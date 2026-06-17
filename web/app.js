@@ -1,9 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const CONFIG = {
-  supabaseUrl: "COLE_AQUI_SUPABASE_URL",
-  supabaseAnonKey: "COLE_AQUI_SUPABASE_ANON_KEY",
-  importFunctionUrl: "COLE_AQUI_FUNCTION_URL/import-stock",
+  supabaseUrl: "https://jqffpijcrzflojahbfyp.supabase.co",
+  supabaseAnonKey: "sb_publishable_AdUjgkJxz54MDgLX_b9tfw_yTJVh4I6",
+  importFunctionUrl: "https://jqffpijcrzflojahbfyp.functions.supabase.co/import-stock",
   importFunctionBearer: "COLE_AQUI_UM_TOKEN_SECRETO_OPCIONAL",
 };
 
