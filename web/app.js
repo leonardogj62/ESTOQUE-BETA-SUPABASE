@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 const CONFIG = {
   supabaseUrl: "https://jqffpijcrzflojahbfyp.supabase.co",
   supabaseAnonKey: "sb_publishable_AdUjgkJxz54MDgLX_b9tfw_yTJVh4I6",
-  importFunctionUrl: "https://jqffpijcrzflojahbfyp.functions.supabase.co/import-stock",
+  importFunctionUrl: "https://jqffpijcrzflojahbfyp.supabase.co/functions/v1/import-stock",
   importFunctionBearer: "COLE_AQUI_UM_TOKEN_SECRETO_OPCIONAL",
 };
 
