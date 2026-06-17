@@ -1,0 +1,4 @@
+project_id = "estoque-beta-supabase"
+
+[functions.import-stock]
+verify_jwt = false

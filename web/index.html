@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estoque Beta Supabase</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Estoque Beta</h1>
+      <p id="status">Conectando ao Supabase...</p>
+    </div>
+    <span class="version">supabase-v0.1</span>
+  </header>
+
+  <main>
+    <section class="toolbar">
+      <div class="search">
+        <span>⌕</span>
+        <input id="search-input" placeholder="Produto, cor ou processo">
+      </div>
+      <button id="refresh-button" type="button">Atualizar</button>
+      <button id="import-button" type="button">Importar Drive</button>
+    </section>
+
+    <section>
+      <h2>Saúde dos estoques</h2>
+      <div id="health-grid" class="health-grid"></div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>Busca</h2>
+        <span id="result-count"></span>
+      </div>
+      <div class="filters" id="source-filters"></div>
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <template id="empty-template">
+    <div class="empty">
+      <strong>Nenhum produto encontrado</strong>
+      <p>Se a importação ainda não rodou, clique em Importar Drive.</p>
+    </div>
+  </template>
+</body>
+</html>
