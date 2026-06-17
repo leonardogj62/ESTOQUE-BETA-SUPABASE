@@ -50,6 +50,7 @@ create table if not exists public.stock_items (
 );
 
 create index if not exists stock_items_product_idx on public.stock_items(product_id);
+create index if not exists stock_items_file_idx on public.stock_items(file_id);
 create index if not exists stock_items_source_idx on public.stock_items(source_id);
 create index if not exists stock_items_color_idx on public.stock_items(normalized_color);
 create index if not exists products_name_trgm_idx on public.products using gin (normalized_name gin_trgm_ops);
@@ -86,6 +87,8 @@ create table if not exists public.price_items (
   availability text,
   expected_arrival text
 );
+
+create index if not exists price_items_price_file_idx on public.price_items(price_file_id);
 
 create table if not exists public.product_labels (
   id uuid primary key default gen_random_uuid(),
@@ -154,6 +157,7 @@ create or replace function public.normalize_text(value text)
 returns text
 language sql
 immutable
+set search_path = public
 as $$
   select trim(regexp_replace(upper(unaccent(coalesce(value,''))), '[^A-Z0-9 ]', ' ', 'g'));
 $$;
@@ -170,6 +174,7 @@ returns table (
 )
 language sql
 stable
+set search_path = public
 as $$
   select
     v.product_name,
