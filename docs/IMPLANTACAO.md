@@ -7,7 +7,6 @@
 - [ ] Rodar `supabase/seed_sources.sql`.
 - [ ] Copiar `Project URL`.
 - [ ] Copiar `anon public key`.
-- [ ] Copiar `service_role key`.
 
 ## Google OAuth
 
@@ -17,6 +16,7 @@
   - `https://www.googleapis.com/auth/gmail.readonly` quando entrar importação de preços por email.
 - [ ] Gerar `GOOGLE_REFRESH_TOKEN` para a conta que acessa as pastas.
 - [ ] Salvar `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_REFRESH_TOKEN` como secrets da função.
+- [ ] Nao criar secret com nome `SUPABASE_`; o Supabase reserva esse prefixo e fornece esses valores automaticamente.
 
 ## Importação
 

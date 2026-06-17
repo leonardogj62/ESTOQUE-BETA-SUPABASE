@@ -54,20 +54,18 @@ Se preferir usar CLI, instale o Supabase CLI e use o roteiro em `scripts/deploy_
 A função espera estes secrets:
 
 ```text
-SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
 GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
 GOOGLE_REFRESH_TOKEN
 ```
+
+O Supabase fornece `SUPABASE_URL` e a chave secreta do projeto automaticamente para a função.
 
 Veja `docs/GOOGLE_REFRESH_TOKEN.md` para gerar o refresh token.
 
 No Supabase CLI, o comando fica assim:
 
 ```bash
-supabase secrets set SUPABASE_URL="https://SEU-PROJETO.supabase.co"
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY="SUA_SERVICE_ROLE_KEY"
 supabase secrets set GOOGLE_CLIENT_ID="SEU_GOOGLE_CLIENT_ID"
 supabase secrets set GOOGLE_CLIENT_SECRET="SEU_GOOGLE_CLIENT_SECRET"
 supabase secrets set GOOGLE_REFRESH_TOKEN="SEU_REFRESH_TOKEN"
