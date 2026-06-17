@@ -9,6 +9,7 @@ O app antigo lia Excel, PDF, Drive e Gmail diretamente no navegador. Isso deixav
 Nesta versão:
 
 - o importador lê os arquivos do Drive;
+- quando existir `.xlsx`, ele usa a planilha; quando a pasta tiver só PDF, ele usa o texto do PDF;
 - os dados tratados são gravados no Supabase;
 - a tela Buscar consulta o Supabase, não os arquivos brutos;
 - cada pasta tem diagnóstico de arquivo, status, quantidade de produtos e erros.
@@ -103,6 +104,8 @@ importFunctionUrl: "https://abc123.functions.supabase.co/import-stock",
 3. Clique em **Importar Drive**.
 4. Veja se cada pasta mostra quantidade maior que zero.
 5. Busque por produto, cor ou processo.
+
+Observação: a pasta `Fem. Promoção` hoje tem apenas PDFs. Ela foi tratada como caso especial pelo importador, então não precisa mais existir uma planilha para aparecer na busca.
 
 ## Próximas fases recomendadas
 

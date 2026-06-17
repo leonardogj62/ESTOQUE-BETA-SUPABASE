@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
+import * as pdfjs from "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
 
 type Source = {
   id: string;
@@ -13,6 +14,13 @@ type ParsedItem = {
   color: string;
   process: string;
   quantity: number;
+};
+
+type DriveFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -86,8 +94,8 @@ async function importSource(source: Source, token: string) {
     }
 
     const bytes = await downloadDriveFile(file, token);
-    const workbook = XLSX.read(bytes, { type: "array" });
-    const items = parseWorkbook(workbook);
+    const parsed = isPdfFile(file) ? await parsePdf(bytes) : parseSpreadsheet(bytes);
+    const items = parsed.items;
 
     const fileRow = await recordStockFile(
       source,
@@ -95,7 +103,7 @@ async function importSource(source: Source, token: string) {
       items.length ? "imported" : "empty",
       items.length ? null : "Arquivo encontrado, mas nenhum item foi extraído",
       items,
-      { sheets: workbook.SheetNames },
+      parsed.rawMeta,
     );
 
     if (items.length) {
@@ -149,8 +157,12 @@ async function getLatestDriveFile(folderId: string, token: string) {
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`Drive list falhou: ${res.status} ${await res.text()}`);
   const data = await res.json();
-  const files = (data.files || []).filter(isSpreadsheetFile);
-  files.sort((a: any, b: any) => dateScore(b) - dateScore(a));
+  const files = (data.files || []).filter(isStockFile);
+  files.sort((a: DriveFile, b: DriveFile) => {
+    const byDate = dateScore(b) - dateScore(a);
+    if (byDate) return byDate;
+    return filePriority(b) - filePriority(a);
+  });
   return files[0] || null;
 }
 
@@ -228,6 +240,85 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) 
 
   const { error } = await supabase.from("stock_items").insert(rows);
   if (error) throw error;
+}
+
+function parseSpreadsheet(bytes: ArrayBuffer) {
+  const workbook = XLSX.read(bytes, { type: "array" });
+  return {
+    items: parseWorkbook(workbook),
+    rawMeta: { file_kind: "spreadsheet", sheets: workbook.SheetNames },
+  };
+}
+
+async function parsePdf(bytes: ArrayBuffer) {
+  const text = await extractPdfText(bytes);
+  return {
+    items: parsePdfText(text),
+    rawMeta: {
+      file_kind: "pdf",
+      text_sample: text.slice(0, 2000),
+    },
+  };
+}
+
+async function extractPdfText(bytes: ArrayBuffer) {
+  const task = (pdfjs as any).getDocument({
+    data: new Uint8Array(bytes),
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  });
+  const doc = await task.promise;
+  const pages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+    const page = await doc.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item: any) => item.str || "").join(" "));
+  }
+
+  return pages.join("\n");
+}
+
+function parsePdfText(text: string): ParsedItem[] {
+  const prepared = text
+    .replace(/\r/g, "\n")
+    .replace(/(?!^)(Nome\s*:)/gi, "\n$1")
+    .replace(/(?!^)(Cor\s*:)/gi, "\n$1");
+  const lines = prepared.split(/\n+/).map(cleanText).filter(Boolean);
+  const items: ParsedItem[] = [];
+  let product = "";
+
+  for (const line of lines) {
+    const nameMatch = line.match(/^Nome\s*:\s*(.+)$/i);
+    if (nameMatch) {
+      product = cleanPdfProductName(nameMatch[1]);
+      continue;
+    }
+
+    const colorMatch = line.match(/^Cor\s*:\s*(.+?)\s+(?:\(\d+\s+items?\)\s+)?([\d.]+,\d+)\s*$/i);
+    if (!colorMatch || !product) continue;
+
+    const color = cleanPdfColorName(colorMatch[1]);
+    const quantity = parseNumber(colorMatch[2]);
+    if (color && quantity > 0) items.push({ product, color, process: "", quantity });
+  }
+
+  return compactItems(items);
+}
+
+function cleanPdfProductName(value: string) {
+  return cleanText(value)
+    .replace(/\s+R\$\s*[\d.,]+\s+[\d.,]+\s*$/i, "")
+    .replace(/\s+[\d.,]+\s+[\d.,]+\s*$/i, "")
+    .replace(/\s+R\$\s*[\d.,]+\s*$/i, "")
+    .trim();
+}
+
+function cleanPdfColorName(value: string) {
+  return cleanText(value)
+    .replace(/\s+\(\d+\s+items?\)\s*$/i, "")
+    .trim();
 }
 
 function parseWorkbook(workbook: XLSX.WorkBook): ParsedItem[] {
@@ -344,7 +435,11 @@ function chooseColumn(headers: string[], type: string) {
   return best;
 }
 
-function isSpreadsheetFile(file: any) {
+function isStockFile(file: DriveFile) {
+  return isSpreadsheetFile(file) || isPdfFile(file);
+}
+
+function isSpreadsheetFile(file: DriveFile) {
   const name = String(file.name || "").toLowerCase();
   return (
     file.mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
@@ -354,7 +449,17 @@ function isSpreadsheetFile(file: any) {
   );
 }
 
-function dateScore(file: any) {
+function isPdfFile(file: DriveFile) {
+  return file.mimeType === "application/pdf" || /\.pdf$/i.test(file.name || "");
+}
+
+function filePriority(file: DriveFile) {
+  if (isSpreadsheetFile(file)) return 2;
+  if (isPdfFile(file)) return 1;
+  return 0;
+}
+
+function dateScore(file: DriveFile) {
   const named = String(file.name || "").match(/(\d{2})[._-](\d{2})[._-](\d{2,4})/);
   if (named) {
     const year = named[3].length === 4 ? Number(named[3]) : 2000 + Number(named[3]);

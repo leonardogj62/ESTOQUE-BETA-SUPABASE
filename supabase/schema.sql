@@ -102,14 +102,16 @@ create table if not exists public.product_labels (
   updated_at timestamptz not null default now()
 );
 
-create or replace view public.v_latest_stock_files as
+create or replace view public.v_latest_stock_files
+with (security_invoker = true) as
 select distinct on (sf.source_id)
   sf.*
 from public.stock_files sf
 where sf.status in ('imported','empty')
 order by sf.source_id, coalesce(sf.modified_at, sf.imported_at) desc, sf.imported_at desc;
 
-create or replace view public.v_stock_search as
+create or replace view public.v_stock_search
+with (security_invoker = true) as
 select
   p.id as product_id,
   p.display_name as product_name,
@@ -129,7 +131,8 @@ join public.products p on p.id = si.product_id
 join public.stock_sources s on s.id = si.source_id
 join public.v_latest_stock_files sf on sf.id = si.file_id;
 
-create or replace view public.v_source_health as
+create or replace view public.v_source_health
+with (security_invoker = true) as
 select
   s.slug,
   s.label,
@@ -193,6 +196,15 @@ alter table public.price_files enable row level security;
 alter table public.price_items enable row level security;
 alter table public.product_labels enable row level security;
 
+drop policy if exists "read stock sources" on public.stock_sources;
+drop policy if exists "read stock files" on public.stock_files;
+drop policy if exists "read products" on public.products;
+drop policy if exists "read stock items" on public.stock_items;
+drop policy if exists "read import runs" on public.import_runs;
+drop policy if exists "read price files" on public.price_files;
+drop policy if exists "read price items" on public.price_items;
+drop policy if exists "read product labels" on public.product_labels;
+
 create policy "read stock sources" on public.stock_sources for select using (true);
 create policy "read stock files" on public.stock_files for select using (true);
 create policy "read products" on public.products for select using (true);
@@ -201,3 +213,19 @@ create policy "read import runs" on public.import_runs for select using (true);
 create policy "read price files" on public.price_files for select using (true);
 create policy "read price items" on public.price_items for select using (true);
 create policy "read product labels" on public.product_labels for select using (true);
+
+grant usage on schema public to anon, authenticated;
+grant select on
+  public.stock_sources,
+  public.stock_files,
+  public.products,
+  public.stock_items,
+  public.import_runs,
+  public.price_files,
+  public.price_items,
+  public.product_labels,
+  public.v_latest_stock_files,
+  public.v_stock_search,
+  public.v_source_health
+to anon, authenticated;
+grant execute on function public.search_stock(text) to anon, authenticated;

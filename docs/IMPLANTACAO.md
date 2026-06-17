@@ -24,7 +24,8 @@
 - [ ] Rodar importação manual.
 - [ ] Verificar `v_source_health`.
 - [ ] Conferir se cada fonte tem `product_count > 0`.
-- [ ] Se alguma fonte vier zero, baixar o arquivo e ajustar parser.
+- [ ] Conferir se `Fem. Promoção` importou pelo PDF mais recente.
+- [ ] Se alguma fonte vier zero, baixar o arquivo citado no diagnóstico e ajustar o parser.
 
 ## App Web
 
@@ -41,4 +42,3 @@
 - [ ] Configurar URL final.
 - [ ] Testar no celular.
 - [ ] Agendar importação automática.
-
