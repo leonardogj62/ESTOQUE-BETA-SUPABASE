@@ -29,7 +29,7 @@ const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -37,6 +37,9 @@ const corsHeaders = {
 };
 
 function getSupabaseSecretKey() {
+  const estoqueKey = Deno.env.get("ESTOQUE_SUPABASE_SECRET_KEY");
+  if (estoqueKey) return estoqueKey;
+
   const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (legacy) return legacy;
 
@@ -58,6 +61,12 @@ Deno.serve(async (req) => {
 
   if (req.method !== "POST") {
     return json({ error: "Use POST" }, 405);
+  }
+
+  try {
+    supabase = createSupabaseAdminClient();
+  } catch (error) {
+    return json({ ok: false, error: messageOf(error) }, 500);
   }
 
   const run = await supabase
@@ -108,6 +117,16 @@ Deno.serve(async (req) => {
     return json({ ok: false, run_id: runId, error: messageOf(error), summary }, 500);
   }
 });
+
+function createSupabaseAdminClient() {
+  if (!SUPABASE_URL) {
+    throw new Error("SUPABASE_URL nao esta disponivel na Edge Function");
+  }
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Chave administrativa ausente. Adicione ESTOQUE_SUPABASE_SECRET_KEY nos Secrets da Edge Function.");
+  }
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+}
 
 async function importSource(source: Source, token: string) {
   try {
