@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
-import * as pdfjs from "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
+import * as pdfjs from "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs?target=deno";
 
 type Source = {
   id: string;
@@ -141,7 +141,7 @@ async function importSource(source: Source, token: string) {
     }
 
     const bytes = await downloadDriveFile(file, token);
-    const parsed = isPdfFile(file) ? await parsePdf(bytes) : parseSpreadsheet(bytes);
+    const parsed = isPdfFile(file) ? await parsePdf(bytes, file, token) : parseSpreadsheet(bytes);
     const items = parsed.items;
 
     const fileRow = await recordStockFile(
@@ -297,8 +297,8 @@ function parseSpreadsheet(bytes: ArrayBuffer) {
   };
 }
 
-async function parsePdf(bytes: ArrayBuffer) {
-  const text = await extractPdfText(bytes);
+async function parsePdf(bytes: ArrayBuffer, file: DriveFile, token: string) {
+  const text = await extractPdfTextWithFallback(bytes, file, token);
   return {
     items: parsePdfText(text),
     rawMeta: {
@@ -308,12 +308,24 @@ async function parsePdf(bytes: ArrayBuffer) {
   };
 }
 
+async function extractPdfTextWithFallback(bytes: ArrayBuffer, file: DriveFile, token: string) {
+  try {
+    return await extractPdfText(bytes);
+  } catch (error) {
+    return await extractPdfTextViaDriveConversion(bytes, file, token, messageOf(error));
+  }
+}
+
 async function extractPdfText(bytes: ArrayBuffer) {
+  (pdfjs as any).GlobalWorkerOptions.workerSrc =
+    "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.worker.mjs?target=deno";
+
   const task = (pdfjs as any).getDocument({
     data: new Uint8Array(bytes),
     disableWorker: true,
     useWorkerFetch: false,
     isEvalSupported: false,
+    disableFontFace: true,
   });
   const doc = await task.promise;
   const pages: string[] = [];
@@ -325,6 +337,60 @@ async function extractPdfText(bytes: ArrayBuffer) {
   }
 
   return pages.join("\n");
+}
+
+async function extractPdfTextViaDriveConversion(bytes: ArrayBuffer, file: DriveFile, token: string, originalError: string) {
+  const tempFileName = `Estoque Beta OCR ${file.id}`;
+  const boundary = `estoque-beta-${crypto.randomUUID()}`;
+  const metadata = {
+    name: tempFileName,
+    mimeType: "application/vnd.google-apps.document",
+  };
+  const encoder = new TextEncoder();
+  const body = new Blob([
+    encoder.encode(`--${boundary}\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n`),
+    encoder.encode(JSON.stringify(metadata)),
+    encoder.encode(`\r\n--${boundary}\r\ncontent-type: application/pdf\r\n\r\n`),
+    new Uint8Array(bytes),
+    encoder.encode(`\r\n--${boundary}--\r\n`),
+  ]);
+
+  const createRes = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    },
+  );
+
+  if (!createRes.ok) {
+    throw new Error(`Leitor de PDF falhou: ${originalError}. Conversao pelo Drive falhou: ${createRes.status} ${await createRes.text()}`);
+  }
+
+  const created = await createRes.json();
+  const tempId = created.id;
+
+  try {
+    const exportRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${tempId}/export?mimeType=text/plain`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+
+    if (!exportRes.ok) {
+      throw new Error(`Exportacao de texto do PDF falhou: ${exportRes.status} ${await exportRes.text()}`);
+    }
+
+    return await exportRes.text();
+  } finally {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${tempId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+  }
 }
 
 function parsePdfText(text: string): ParsedItem[] {
@@ -384,7 +450,8 @@ function parseNomeCorProcesso(rows: any[][]): ParsedItem[] {
   let product = "";
   let process = "";
 
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     const cells = row.slice(0, 6).map((c) => String(c || "").trim());
     const joined = cells.join(" ");
     const processMatch = joined.match(/processo\s*[:\s]\s*([A-Z0-9\-./]+)/i);
@@ -399,15 +466,67 @@ function parseNomeCorProcesso(rows: any[][]): ParsedItem[] {
       continue;
     }
 
-    const colorCell = cells.find((c) => /^Cor\s*[:\s]/i.test(c));
+    const colorIndex = cells.findIndex((c) => /^Cor\s*[:\s]/i.test(c));
+    const colorCell = colorIndex >= 0 ? cells[colorIndex] : "";
     if (!colorCell || !product) continue;
 
     const color = (colorCell.match(/^Cor\s*[:\s]\s*(.+?)(?:\s*\(|$)/i)?.[1] || "").replace(/\s+/g, " ").trim();
-    const quantity = parseNumber(row[4]);
+    const detailed = parseColorDetails(rows, i, product, color);
+    if (detailed.length) {
+      items.push(...detailed);
+      continue;
+    }
+
+    const quantity = findQuantityOnColorRow(row, colorIndex);
     if (color && quantity > 0) items.push({ product, color, process, quantity });
   }
 
   return compactItems(items);
+}
+
+function parseColorDetails(rows: any[][], colorRowIndex: number, product: string, color: string) {
+  const headerIndex = findDetailHeaderIndex(rows, colorRowIndex + 1);
+  if (headerIndex < 0) return [];
+
+  const headers = rows[headerIndex].map(normalizeHeader);
+  const quantityCol = chooseColumn(headers, "quantity");
+  const processCol = chooseColumn(headers, "process");
+  if (quantityCol < 0) return [];
+
+  const items: ParsedItem[] = [];
+  for (let i = headerIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const normalized = normalizeText(row.join(" "));
+    if (!normalized && items.length) break;
+    if (normalized.startsWith("NOME ") || normalized.includes(" NOME ") || normalized.startsWith("COR ")) break;
+    if (/QTDE EM ESTOQUE|SUBCLASSE/.test(normalized)) break;
+
+    const quantity = parseNumber(row[quantityCol]);
+    const process = processCol >= 0 ? cleanText(row[processCol]) : "";
+    if (quantity > 0) items.push({ product, color, process, quantity });
+  }
+
+  return items;
+}
+
+function findDetailHeaderIndex(rows: any[][], startIndex: number) {
+  for (let i = startIndex; i < Math.min(rows.length, startIndex + 5); i++) {
+    const normalized = normalizeText(rows[i].join(" "));
+    if (/QTDE EM ESTOQUE|QUANTIDADE|QTD|QTDE/.test(normalized) && /PROCESSO|LOTE|REFERENCIA|REF/.test(normalized)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function findQuantityOnColorRow(row: any[], colorIndex: number) {
+  const candidates = row
+    .slice(Math.max(0, colorIndex + 1), Math.min(row.length, colorIndex + 7))
+    .map(parseNumber)
+    .filter((value) => value > 0);
+
+  if (!candidates.length) return NaN;
+  return Math.max(...candidates);
 }
 
 function parseTabela(rows: any[][]): ParsedItem[] {
