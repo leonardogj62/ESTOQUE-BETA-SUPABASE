@@ -37,8 +37,9 @@ const SUPABASE_SERVICE_ROLE_KEY = getSupabaseSecretKey();
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
+const DEFAULT_PRICE_DRIVE_FOLDER_ID = "1TLFeg3czJkesCOwFl7qMnTUB2B14xLKO";
 const PRICE_DRIVE_FILE_ID = Deno.env.get("PRICE_DRIVE_FILE_ID") || "";
-const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || "";
+const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || DEFAULT_PRICE_DRIVE_FOLDER_ID;
 
 let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
@@ -316,7 +317,8 @@ async function importPrices(token: string) {
     const fileRow = await recordPriceFile(file, items.length ? "imported" : "failed", items.length ? null : "Nenhum preço foi extraído", items);
 
     if (items.length) {
-      await supabase.from("price_items").delete().eq("price_file_id", fileRow.id);
+      const { error: deleteError } = await supabase.from("price_items").delete().eq("source_type", "drive");
+      if (deleteError) throw deleteError;
       await insertPriceItems(fileRow.id, items);
     }
 
@@ -668,10 +670,11 @@ function parsePriceRows(rows: any[][]) {
     const row = rows[i];
     const product = cleanText(row[best.productCol]);
     if (!product || /^(TOTAL|SUBTOTAL|PRODUTO|DESCRICAO|NOME COMERCIAL)$/i.test(product)) continue;
+    const unit = best.unitCol >= 0 ? cleanText(row[best.unitCol]) : unitForProduct(product);
 
     const commissionPrices: Record<string, number> = {};
     for (const col of best.priceCols) {
-      const price = parseNumber(row[col.index]);
+      const price = parsePriceValue(row[col.index], row[col.index + 1], unit);
       if (!(price > 0)) continue;
       const label = cleanCommissionLabel(col.header);
       commissionPrices[label] = roundMoney(price);
@@ -685,7 +688,7 @@ function parsePriceRows(rows: any[][]) {
 
     items.push({
       product,
-      unit: best.unitCol >= 0 ? cleanText(row[best.unitCol]) : unitForProduct(product),
+      unit,
       currency,
       commissionPrices,
       availability: best.availabilityCol >= 0 ? cleanText(row[best.availabilityCol]) : "",
@@ -734,6 +737,7 @@ function choosePriceColumn(headers: string[], type: string) {
 function isPriceHeader(header: string) {
   if (!header) return false;
   if (/\b(PRECO|PREÇO|VALOR|COMISSAO|COMISSAO|COMIS|R\$|U\$|USD|DOLAR|DOLLAR)\b/.test(header)) return true;
+  if (/TABELA/.test(header)) return true;
   if (/%/.test(header)) return true;
   return false;
 }
@@ -745,6 +749,29 @@ function cleanCommissionLabel(header: string) {
     .replace(/\s+/g, " ")
     .trim();
   return cleaned || "Preço";
+}
+
+function parsePriceValue(value: unknown, nextValue: unknown, unit: string) {
+  if (typeof value === "number") return value;
+
+  const text = String(value || "");
+  if (/^(R\$|U\$|USD|BRL)$/i.test(text.trim())) {
+    return parseNumber(nextValue);
+  }
+
+  const unitMatch = String(unit || "").toUpperCase().startsWith("KG") ? "KG" : "MT";
+  const unitPrice = extractUnitPrice(text, unitMatch);
+  if (unitPrice > 0) return unitPrice;
+
+  return parseNumber(value);
+}
+
+function extractUnitPrice(text: string, unit: "KG" | "MT") {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const pattern = new RegExp(`(?:R\\$|U\\$|USD)?\\s*([\\d.]+,\\d{2}|\\d+\\.\\d{1,2})\\s*${unit}\\b`, "i");
+  const match = normalized.match(pattern);
+  if (!match) return NaN;
+  return parseNumber(match[1]);
 }
 
 function parseCurrency(value: unknown): "BRL" | "USD" | null {

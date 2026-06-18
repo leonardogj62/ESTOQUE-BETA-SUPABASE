@@ -109,11 +109,10 @@ Observação: a pasta `Fem. Promoção` hoje tem apenas PDFs. Ela foi tratada co
 
 ## Próximas fases recomendadas
 
-1. Configurar `PRICE_DRIVE_FILE_ID` ou `PRICE_DRIVE_FOLDER_ID` nos Secrets para ativar a importação automática de preços.
-2. Importar etiquetas OCR para `product_labels`.
-3. Criar comparação entre snapshots por `stock_files`.
-4. Agendar a função `import-stock` por cron.
-5. Publicar o app web no GitHub Pages ou Vercel.
+1. Importar etiquetas OCR para `product_labels`.
+2. Criar comparação entre snapshots por `stock_files`.
+3. Agendar a função `import-stock` por cron.
+4. Publicar o app web no GitHub Pages ou Vercel.
 
 ## Tabela de preços
 
@@ -125,7 +124,13 @@ A aba **Preços** permite:
 - registrar comissões variadas, uma por linha, como `0% = 19,90`;
 - visualizar preços com duas casas decimais, como `R$ 19,90`.
 
-Para a importação automática, configure pelo menos um destes secrets na Edge Function:
+Por padrão, a importação automática usa esta pasta do Drive:
+
+```text
+1TLFeg3czJkesCOwFl7qMnTUB2B14xLKO
+```
+
+Para sobrescrever, configure pelo menos um destes secrets na Edge Function:
 
 ```text
 PRICE_DRIVE_FILE_ID

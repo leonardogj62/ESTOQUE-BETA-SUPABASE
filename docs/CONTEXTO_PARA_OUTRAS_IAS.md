@@ -593,11 +593,17 @@ PRICE_DRIVE_FILE_ID
 PRICE_DRIVE_FOLDER_ID
 ```
 
+Pasta padrao configurada no codigo:
+
+```text
+1TLFeg3czJkesCOwFl7qMnTUB2B14xLKO
+```
+
 Use `PRICE_DRIVE_FILE_ID` para apontar diretamente para a planilha de precos. Use `PRICE_DRIVE_FOLDER_ID` para pegar a planilha mais recente dentro de uma pasta.
 
 Observacao importante:
 
 ```text
 O banco ja pode receber precos manuais depois de aplicar supabase/prices.sql.
-A importacao automatica pelo botao Importar Precos depende de publicar novamente a Edge Function import-stock no Supabase.
+A importacao automatica pelo botao Importar Precos depende da Edge Function import-stock publicada com o codigo atualizado.
 ```
