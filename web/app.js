@@ -1,10 +1,13 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-
 const CONFIG = {
   supabaseUrl: "https://jqffpijcrzflojahbfyp.supabase.co",
   supabaseAnonKey: "sb_publishable_AdUjgkJxz54MDgLX_b9tfw_yTJVh4I6",
   importFunctionUrl: "https://jqffpijcrzflojahbfyp.supabase.co/functions/v1/import-stock",
   importFunctionBearer: "COLE_AQUI_UM_TOKEN_SECRETO_OPCIONAL",
+};
+
+const restHeaders = {
+  apikey: CONFIG.supabaseAnonKey,
+  accept: "application/json",
 };
 
 const state = {
@@ -27,7 +30,6 @@ const els = {
 };
 
 const configured = !CONFIG.supabaseUrl.startsWith("COLE_AQUI");
-const supabase = configured ? createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey) : null;
 
 boot();
 
@@ -65,23 +67,32 @@ async function refreshAll() {
 }
 
 async function loadHealth() {
-  const { data, error } = await supabase.from("v_source_health").select("*");
-  if (error) {
+  try {
+    return await supabaseSelect("v_source_health", "select=*");
+  } catch (error) {
     els.status.textContent = "Erro ao carregar saúde dos estoques";
     console.error(error);
     return [];
   }
-  return data || [];
 }
 
 async function loadStock() {
-  const { data, error } = await supabase.from("v_stock_search").select("*").order("product_name");
-  if (error) {
+  try {
+    return await supabaseSelect("v_stock_search", "select=*&order=product_name.asc");
+  } catch (error) {
     els.status.textContent = "Erro ao carregar busca";
     console.error(error);
     return [];
   }
-  return data || [];
+}
+
+async function supabaseSelect(resource, query) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, {
+    headers: restHeaders,
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.message || "Consulta ao Supabase falhou");
+  return payload || [];
 }
 
 async function runImport() {
@@ -95,7 +106,7 @@ async function runImport() {
   els.status.textContent = "Importando arquivos do Drive...";
 
   try {
-    const headers = { "content-type": "application/json" };
+    const headers = { ...restHeaders, "content-type": "application/json" };
     if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
       headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
     }
