@@ -22,6 +22,9 @@ const state = {
   health: [],
   query: "",
   source: "todos",
+  groupByProcess: false,
+  expandedResults: new Set(),
+  expandedAllResults: false,
   showroom: {
     updates: [],
     itemCounts: new Map(),
@@ -36,6 +39,8 @@ const els = {
   importButton: document.getElementById("import-button"),
   healthGrid: document.getElementById("health-grid"),
   filters: document.getElementById("source-filters"),
+  toggleAllProducts: document.getElementById("toggle-all-products"),
+  groupProcessButton: document.getElementById("group-process-button"),
   results: document.getElementById("results"),
   count: document.getElementById("result-count"),
   emptyTemplate: document.getElementById("empty-template"),
@@ -76,11 +81,26 @@ async function boot() {
 function bindEvents() {
   els.input.addEventListener("input", () => {
     state.query = els.input.value.trim();
+    resetResultExpansion();
     renderResults();
   });
 
   els.refresh.addEventListener("click", refreshAll);
   els.importButton.addEventListener("click", runImport);
+  els.toggleAllProducts.addEventListener("click", toggleAllCurrentResults);
+  els.groupProcessButton.addEventListener("click", () => {
+    state.groupByProcess = !state.groupByProcess;
+    resetResultExpansion();
+    renderResults();
+  });
+  els.results.addEventListener("click", (event) => {
+    const target = event.target;
+    const btn = target instanceof Element
+      ? target.closest(".product-toggle")
+      : target?.parentElement?.closest(".product-toggle");
+    if (!btn) return;
+    toggleProductBlock(btn.dataset.key);
+  });
 
   // Navegação entre abas
   document.getElementById("main-tabs").addEventListener("click", (event) => {
@@ -279,6 +299,7 @@ function renderFilters() {
   els.filters.querySelectorAll(".filter").forEach((button) => {
     button.addEventListener("click", () => {
       state.source = button.dataset.source;
+      resetResultExpansion();
       renderFilters();
       renderResults();
     });
@@ -296,46 +317,84 @@ function renderResults() {
       || normalize(row.process_code || "").includes(q);
   });
 
-  els.count.textContent = `${filtered.length} cor(es)`;
   if (!filtered.length) {
     renderEmpty("Nenhum produto encontrado", "Tente outro filtro ou rode uma nova importação.");
+    updateResultControlLabels([]);
     return;
   }
 
-  const grouped = groupByProduct(filtered);
+  const grouped = state.groupByProcess ? groupByProductProcess(filtered) : groupByProduct(filtered);
+  syncExpandedResults(grouped);
+  els.count.textContent = state.groupByProcess
+    ? `${grouped.length} processo(s) · ${filtered.length} cor(es)`
+    : `${grouped.length} produto(s) · ${filtered.length} cor(es)`;
   els.results.innerHTML = grouped.map(renderProduct).join("");
+  updateResultControlLabels(grouped);
 }
 
 function groupByProduct(rows) {
   const map = new Map();
   for (const row of rows) {
-    if (!map.has(row.product_name)) map.set(row.product_name, []);
-    map.get(row.product_name).push(row);
+    const key = resultKey("produto", row.product_name);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        name: row.product_name,
+        subtitle: "",
+        items: [],
+      });
+    }
+    map.get(key).items.push(row);
   }
-  return [...map.entries()].map(([name, items]) => ({ name, items }));
+  return [...map.values()];
+}
+
+function groupByProductProcess(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const process = row.process_code || "Sem processo";
+    const key = resultKey("processo", row.product_name, process);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        name: row.product_name,
+        subtitle: `Processo: ${process}`,
+        items: [],
+      });
+    }
+    map.get(key).items.push(row);
+  }
+  return [...map.values()];
 }
 
 function renderProduct(product) {
   const total = product.items.reduce((sum, item) => sum + Number(item.quantity_meters || 0), 0);
   const sources = [...new Map(product.items.map((i) => [i.source_label, i])).values()];
+  const expanded = state.expandedResults.has(product.key);
   return `
-    <article class="product-card">
-      <div class="product-head">
-        <div class="product-name">${escapeHtml(product.name)}</div>
-        <div class="product-total">${product.items.length} cor(es) · ${Math.round(total)} m</div>
-        <div class="source-tags">
-          ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
-        </div>
-      </div>
-      ${product.items.map((item) => `
-        <div class="color-row">
-          <div>
-            <strong>${escapeHtml(item.color_name)}</strong>
-            <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
+    <article class="product-card ${expanded ? "expanded" : ""}">
+      <button class="product-head product-toggle" type="button" data-key="${escapeHtml(product.key)}" aria-expanded="${expanded ? "true" : "false"}">
+        <div class="product-summary">
+          <div class="product-name">${escapeHtml(product.name)}</div>
+          ${product.subtitle ? `<div class="product-process">${escapeHtml(product.subtitle)}</div>` : ""}
+          <div class="product-total">${product.items.length} cor(es) · ${Math.round(total)} m</div>
+          <div class="source-tags">
+            ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
           </div>
-          <div class="qty">${Math.round(Number(item.quantity_meters || 0))} m</div>
         </div>
-      `).join("")}
+        <span class="product-arrow" aria-hidden="true">⌄</span>
+      </button>
+      <div class="color-list" ${expanded ? "" : "hidden"}>
+        ${product.items.map((item) => `
+          <div class="color-row">
+            <div>
+              <strong>${escapeHtml(item.color_name)}</strong>
+              <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
+            </div>
+            <div class="qty">${Math.round(Number(item.quantity_meters || 0))} m</div>
+          </div>
+        `).join("")}
+      </div>
     </article>
   `;
 }
@@ -343,6 +402,62 @@ function renderProduct(product) {
 function renderEmpty(title, detail) {
   els.results.innerHTML = `<div class="empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p></div>`;
   els.count.textContent = "";
+}
+
+function resultKey(...parts) {
+  return parts.map((part) => normalize(part)).join("|||");
+}
+
+function resetResultExpansion() {
+  state.expandedResults = new Set();
+  state.expandedAllResults = false;
+}
+
+function syncExpandedResults(groups) {
+  if (state.expandedAllResults) {
+    state.expandedResults = new Set(groups.map((group) => group.key));
+    return;
+  }
+  const validKeys = new Set(groups.map((group) => group.key));
+  state.expandedResults = new Set([...state.expandedResults].filter((key) => validKeys.has(key)));
+}
+
+function toggleProductBlock(key) {
+  if (!key) return;
+  if (state.expandedResults.has(key)) {
+    state.expandedResults.delete(key);
+  } else {
+    state.expandedResults.add(key);
+  }
+  state.expandedAllResults = false;
+  renderResults();
+}
+
+function toggleAllCurrentResults() {
+  const filtered = state.rows.filter((row) => {
+    const bySource = state.source === "todos" || row.source_slug === state.source;
+    if (!bySource) return false;
+    const q = normalize(state.query);
+    if (!q) return true;
+    return normalize(row.product_name).includes(q)
+      || normalize(row.color_name).includes(q)
+      || normalize(row.process_code || "").includes(q);
+  });
+  const grouped = state.groupByProcess ? groupByProductProcess(filtered) : groupByProduct(filtered);
+  state.expandedAllResults = !state.expandedAllResults;
+  state.expandedResults = state.expandedAllResults
+    ? new Set(grouped.map((group) => group.key))
+    : new Set();
+  renderResults();
+}
+
+function updateResultControlLabels(groups) {
+  els.groupProcessButton.textContent = state.groupByProcess ? "Agrupar por produto" : "Separar por processo";
+  els.groupProcessButton.classList.toggle("active", state.groupByProcess);
+
+  const allVisibleOpen = groups.length > 0 && groups.every((group) => state.expandedResults.has(group.key));
+  els.toggleAllProducts.textContent = allVisibleOpen ? "Fechar todos" : "Abrir todos";
+  els.toggleAllProducts.disabled = groups.length === 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -499,3 +499,38 @@ Ou rodar o schema completo:
 ```text
 supabase/schema.sql
 ```
+
+## Interface da Busca
+
+Em 18/06/2026 a tela de Busca foi ajustada para nao iniciar com todas as cores abertas.
+
+Comportamento esperado:
+
+```text
+1. Ao abrir o app, cada produto aparece como uma faixa fechada.
+2. A faixa mostra nome do produto, quantidade de cores, metragem total e etiquetas das fontes.
+3. No fim da faixa existe uma seta para baixo.
+4. Ao clicar na faixa/seta, o produto abre e mostra as cores.
+5. O botao Abrir todos abre todos os produtos visiveis no filtro atual.
+6. Quando tudo esta aberto, o mesmo botao vira Fechar todos.
+7. O botao Separar por processo muda o agrupamento para produto + processo.
+8. Nesse modo, um produto com varios processos aparece em blocos separados, por exemplo:
+   ALFAIATARIA CETIM ALEXIS / Processo AT-25042
+   ALFAIATARIA CETIM ALEXIS / Processo AT-24096
+```
+
+Arquivos principais dessa interface:
+
+```text
+web/index.html
+web/styles.css
+web/app.js
+```
+
+Cuidados:
+
+- nao voltar a renderizar todas as cores abertas por padrao;
+- manter o botao de abrir/fechar atuando apenas no resultado filtrado atual;
+- ao filtrar por fonte ou texto, a busca deve voltar fechada por padrao;
+- ao ativar Separar por processo, a busca tambem deve voltar fechada por padrao;
+- a busca por texto continua procurando produto, cor e processo.
