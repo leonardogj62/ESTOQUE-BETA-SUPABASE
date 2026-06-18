@@ -112,13 +112,23 @@ async function runImport() {
     }
     const res = await fetch(CONFIG.importFunctionUrl, { method: "POST", headers });
     const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || "Importação falhou");
+    if (!res.ok) throw new Error(readableError(payload.error || payload || "Importação falhou"));
     await refreshAll();
   } catch (error) {
-    els.status.textContent = error.message;
+    els.status.textContent = readableError(error);
   } finally {
     els.importButton.disabled = false;
     els.importButton.textContent = "Importar Drive";
+  }
+}
+
+function readableError(error) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
 }
 

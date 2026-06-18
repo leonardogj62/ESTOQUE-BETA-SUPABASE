@@ -75,6 +75,10 @@ Deno.serve(async (req) => {
     .select("id")
     .single();
 
+  if (run.error) {
+    return json({ ok: false, error: messageOf(run.error) }, 500);
+  }
+
   const runId = run.data?.id;
   const summary: Record<string, unknown>[] = [];
 
@@ -542,7 +546,13 @@ function unique<T>(values: T[]) {
 }
 
 function messageOf(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function json(body: unknown, status = 200) {
