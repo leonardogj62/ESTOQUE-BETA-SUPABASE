@@ -234,3 +234,21 @@ grant select on
   public.v_source_health
 to anon, authenticated;
 grant execute on function public.search_stock(text) to anon, authenticated;
+
+grant usage on schema public to service_role;
+grant all on
+  public.stock_sources,
+  public.stock_files,
+  public.products,
+  public.stock_items,
+  public.import_runs,
+  public.price_files,
+  public.price_items,
+  public.product_labels
+to service_role;
+grant select on
+  public.v_latest_stock_files,
+  public.v_stock_search,
+  public.v_source_health
+to service_role;
+grant execute on all functions in schema public to service_role;
