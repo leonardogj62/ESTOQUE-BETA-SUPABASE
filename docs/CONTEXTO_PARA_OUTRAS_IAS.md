@@ -436,3 +436,66 @@ Ainda nao foi implementado:
 - tela administrativa de diagnostico mais completa.
 
 O app de busca de estoque ja esta funcionando.
+
+## Funcionalidade: Mostruario fisico
+
+Em 18/06/2026 foi adicionada a aba:
+
+```text
+Mostruario
+```
+
+Objetivo:
+
+```text
+Registrar cada atualizacao fisica do mostruario de tecidos e comparar o estoque atual com a ultima atualizacao registrada para os mesmos produtos/cores/fontes.
+```
+
+Arquivos alterados:
+
+```text
+web/index.html
+web/styles.css
+web/app.js
+supabase/schema.sql
+supabase/showroom.sql
+```
+
+Tabelas novas:
+
+```text
+showroom_updates
+showroom_update_items
+```
+
+Fluxo no app:
+
+```text
+1. Abrir a aba Mostruario.
+2. Clicar em Atualizar Mostruario.
+3. Selecionar os produtos atualizados fisicamente.
+4. Confirmar.
+5. O app salva uma foto do estoque atual desses produtos.
+6. O app compara com a atualizacao anterior que tiver os mesmos produtos/cores/fontes.
+7. O historico fica salvo para consulta.
+```
+
+Observacoes tecnicas importantes:
+
+- a selecao e feita por produto;
+- ao salvar, o app registra todas as cores/fontes daquele produto que estao em `v_stock_search`;
+- a comparacao nao usa somente a atualizacao imediatamente anterior; ela procura a ultima ocorrencia anterior de cada produto + fonte + cor;
+- se nao existir base anterior para os itens selecionados, o primeiro registro vira a base da proxima comparacao;
+- as tabelas tem leitura e insercao liberadas para `anon`, seguindo o padrao atual do app sem login.
+
+Para aplicar o banco em outro projeto, rodar:
+
+```text
+supabase/showroom.sql
+```
+
+Ou rodar o schema completo:
+
+```text
+supabase/schema.sql
+```

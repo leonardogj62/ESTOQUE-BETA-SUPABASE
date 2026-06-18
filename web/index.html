@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Estoque Beta Supabase</title>
-  <link rel="stylesheet" href="./styles.css">
-  <script defer src="./app.js?v=20260617-1"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260618-1">
+  <script defer src="./app.js?v=20260618-4"></script>
 </head>
 <body>
   <header class="topbar">
@@ -26,20 +26,66 @@
       <button id="import-button" type="button">Importar Drive</button>
     </section>
 
-    <section>
-      <h2>Saúde dos estoques</h2>
-      <div id="health-grid" class="health-grid"></div>
-    </section>
+    <nav class="tabs" id="main-tabs">
+      <button class="tab active" data-tab="busca" type="button">Busca</button>
+      <button class="tab" data-tab="mostruario" type="button">Mostruário</button>
+    </nav>
 
-    <section>
-      <div class="section-title">
-        <h2>Busca</h2>
-        <span id="result-count"></span>
-      </div>
-      <div class="filters" id="source-filters"></div>
-      <div id="results" class="results"></div>
-    </section>
+    <div id="tab-busca">
+      <section>
+        <h2>Saúde dos estoques</h2>
+        <div id="health-grid" class="health-grid"></div>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>Busca</h2>
+          <span id="result-count"></span>
+        </div>
+        <div class="filters" id="source-filters"></div>
+        <div id="results" class="results"></div>
+      </section>
+    </div>
+
+    <div id="tab-mostruario" hidden>
+      <section>
+        <div class="section-title">
+          <h2>Mostruário Físico</h2>
+          <button id="new-update-btn" class="primary" type="button">Atualizar Mostruário</button>
+        </div>
+        <div id="showroom-history" class="showroom-history"></div>
+      </section>
+
+      <section id="showroom-diff-section" hidden>
+        <div class="section-title">
+          <h2 id="showroom-diff-title">Comparação</h2>
+          <button id="close-diff-btn" type="button">Fechar</button>
+        </div>
+        <div id="showroom-diff"></div>
+      </section>
+    </div>
   </main>
+
+  <!-- Modal: seleção de produtos para mostruário -->
+  <div id="product-selector-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Atualizar Mostruário</h3>
+      </div>
+      <div class="modal-body">
+        <input id="product-selector-search" class="modal-search-input" placeholder="Filtrar produto ou cor...">
+        <p class="selector-help">Selecione os produtos atualizados fisicamente. O sistema salva o estoque atual de todas as fontes e cores desses produtos.</p>
+        <div id="product-selector-list" class="product-selector-list"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="selector-count">0 produto(s) selecionado(s)</span>
+        <div class="modal-actions">
+          <button id="cancel-update-btn" type="button">Cancelar</button>
+          <button id="confirm-update-btn" class="primary" type="button" disabled>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <template id="empty-template">
     <div class="empty">

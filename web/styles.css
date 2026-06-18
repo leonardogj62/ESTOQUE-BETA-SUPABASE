@@ -14,6 +14,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -80,6 +82,39 @@ button.primary, #import-button {
   border-color: var(--navy);
 }
 
+/* ---------- Abas ---------- */
+
+.tabs {
+  display: flex;
+  gap: 0;
+  margin: 20px 0 0;
+  border-bottom: 2px solid var(--line);
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  min-height: unset;
+  margin-bottom: -2px;
+  transition: color .15s, border-color .15s;
+}
+
+.tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--navy);
+}
+
+.tab:hover:not(.active) { color: var(--ink); }
+
+/* ---------- Cards de saúde ---------- */
+
 .health-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(140px, 1fr));
@@ -98,6 +133,8 @@ button.primary, #import-button {
 .health-label { font-size: 13px; font-weight: 800; }
 .health-count { font-size: 22px; font-weight: 800; margin-top: 6px; }
 .health-meta { color: var(--muted); font-size: 11px; line-height: 1.4; margin-top: 6px; overflow-wrap: anywhere; }
+
+/* ---------- Busca ---------- */
 
 .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 #result-count { color: var(--muted); font-size: 12px; }
@@ -167,7 +204,213 @@ button.primary, #import-button {
   border-radius: 8px;
 }
 
+/* ---------- Mostruário: histórico ---------- */
+
+.showroom-history { display: grid; gap: 8px; }
+
+.showroom-loading { color: var(--muted); font-size: 13px; padding: 12px 0; }
+
+.showroom-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.showroom-card-date { font-size: 14px; font-weight: 800; flex: 1; }
+.showroom-card-summary { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.showroom-card-note { font-size: 12px; color: var(--muted); flex: 2; }
+
+.showroom-view-diff {
+  min-height: 34px;
+  font-size: 13px;
+  padding: 0 12px;
+}
+
+/* ---------- Mostruário: diff ---------- */
+
+.diff-notice {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.diff-group {
+  margin-bottom: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diff-group summary {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 12px 14px;
+  user-select: none;
+}
+
+.diff-group summary:hover { background: var(--soft); }
+
+.diff-table-wrap { overflow-x: auto; }
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.diff-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--soft);
+  border-bottom: 2px solid var(--line);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.diff-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.diff-table tr:last-child td { border-bottom: none; }
+
+.diff-table tr.row-up  td { background: #f0fce8; }
+.diff-table tr.row-down td { background: #fce8e8; }
+.diff-table tr.row-new  td { background: #e8f0fc; }
+
+.diff-delta { font-weight: 800; white-space: nowrap; }
+.diff-table tr.row-up   .diff-delta { color: #2e6b0a; }
+.diff-table tr.row-down .diff-delta { color: #a80000; }
+
+/* ---------- Modal seletor ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--card);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .28);
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h3 { font-size: 16px; margin: 0; }
+
+.modal-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  gap: 8px;
+  min-height: 0;
+}
+
+.modal-search-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.modal-search-input:focus { border-color: var(--navy); }
+
+.selector-help {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.product-selector-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 0;
+}
+
+.selector-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  transition: background .1s;
+}
+
+.selector-item:last-child { border-bottom: none; }
+.selector-item:hover { background: var(--soft); }
+.selector-item.selected { background: #eaf3de; }
+
+.selector-item input[type=checkbox] { margin-top: 3px; flex-shrink: 0; cursor: pointer; }
+
+.selector-item-info { flex: 1; }
+.selector-product-name { font-size: 13px; font-weight: 700; }
+.selector-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.selector-more {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 10px;
+  margin: 0;
+}
+
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#selector-count { font-size: 13px; color: var(--muted); }
+.modal-actions { display: flex; gap: 8px; }
+.modal-actions button { min-height: 38px; font-size: 14px; }
+
+/* ---------- Responsivo ---------- */
+
 @media (max-width: 760px) {
   .toolbar { grid-template-columns: 1fr; }
   .health-grid { grid-template-columns: 1fr 1fr; }
+  .diff-table { font-size: 12px; }
+  .diff-table th, .diff-table td { padding: 7px 8px; }
 }
