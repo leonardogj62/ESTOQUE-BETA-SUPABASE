@@ -607,3 +607,32 @@ Observacao importante:
 O banco ja pode receber precos manuais depois de aplicar supabase/prices.sql.
 A importacao automatica pelo botao Importar Precos depende da Edge Function import-stock publicada com o codigo atualizado.
 ```
+
+## Etiquetas dos produtos
+
+A importacao de etiquetas usa a mesma Edge Function `import-stock`, com:
+
+```json
+{ "action": "import_labels" }
+```
+
+Pasta padrao configurada no codigo:
+
+```text
+11msFrrRee3JfCMrl_-Ys64-UyYeV3LOt
+```
+
+Secret opcional para sobrescrever a pasta:
+
+```text
+LABEL_DRIVE_FOLDER_ID
+```
+
+Comportamento atual:
+
+```text
+A funcao lista a pasta de etiquetas recursivamente, ignora fotos brutas IMG_..., e importa imagens cujo nome tenha BETA.
+O parser espera nomes como BETA - PRODUTO - REF 0000.jpeg.
+As linhas entram em public.product_labels com display_name, normalized_name, reference, drive_photo_id e ocr_text.
+O app carrega product_labels em refreshAll e mostra as etiquetas dentro dos cards de produto expandidos.
+```

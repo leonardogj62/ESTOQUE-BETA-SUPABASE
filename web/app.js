@@ -21,6 +21,7 @@ const state = {
   rows: [],
   health: [],
   prices: [],
+  labels: [],
   query: "",
   source: "todos",
   priceQuery: "",
@@ -40,6 +41,7 @@ const els = {
   input: document.getElementById("search-input"),
   refresh: document.getElementById("refresh-button"),
   importButton: document.getElementById("import-button"),
+  importLabelsButton: document.getElementById("import-labels-button"),
   healthGrid: document.getElementById("health-grid"),
   filters: document.getElementById("source-filters"),
   toggleAllProducts: document.getElementById("toggle-all-products"),
@@ -106,6 +108,7 @@ function bindEvents() {
 
   els.refresh.addEventListener("click", refreshAll);
   els.importButton.addEventListener("click", runImport);
+  els.importLabelsButton.addEventListener("click", runLabelImport);
   els.importPricesButton.addEventListener("click", runPriceImport);
   els.newPriceButton.addEventListener("click", openPriceModal);
   els.cancelPriceBtn.addEventListener("click", closePriceModal);
@@ -184,10 +187,11 @@ function switchTab(tabName) {
 
 async function refreshAll() {
   els.status.textContent = "Carregando dados...";
-  const [health, stock, prices] = await Promise.all([loadHealth(), loadStock(), loadPrices()]);
+  const [health, stock, prices, labels] = await Promise.all([loadHealth(), loadStock(), loadPrices(), loadLabels()]);
   state.health = health;
   state.rows = stock;
   state.prices = prices;
+  state.labels = labels;
   renderHealth();
   renderFilters();
   renderResults();
@@ -219,6 +223,15 @@ async function loadStock() {
 async function loadPrices() {
   try {
     return await supabaseSelectAll("price_items", "select=*&order=display_name.asc,updated_at.desc");
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+async function loadLabels() {
+  try {
+    return await supabaseSelectAll("product_labels", "select=*&order=display_name.asc");
   } catch (error) {
     console.error(error);
     return [];
@@ -307,6 +320,43 @@ async function runPriceImport() {
   } finally {
     els.importPricesButton.disabled = false;
     els.importPricesButton.textContent = "Importar Preços";
+  }
+}
+
+async function runLabelImport() {
+  if (CONFIG.importFunctionUrl.startsWith("COLE_AQUI")) {
+    alert("Configure importFunctionUrl em web/app.js antes de importar.");
+    return;
+  }
+
+  els.importLabelsButton.disabled = true;
+  els.importLabelsButton.textContent = "Importando...";
+  els.status.textContent = "Importando etiquetas...";
+
+  try {
+    const headers = { ...restHeaders, "content-type": "application/json" };
+    if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
+      headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
+    }
+
+    const res = await fetch(CONFIG.importFunctionUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "import_labels" }),
+    });
+    const payload = await res.json();
+    if (!res.ok || payload.ok === false) {
+      throw new Error(readableError(payload.error || payload || "Importação de etiquetas falhou"));
+    }
+
+    state.labels = await loadLabels();
+    renderResults();
+    els.status.textContent = "Etiquetas importadas";
+  } catch (error) {
+    els.status.textContent = readableError(error);
+  } finally {
+    els.importLabelsButton.disabled = false;
+    els.importLabelsButton.textContent = "Importar Etiquetas";
   }
 }
 
@@ -469,6 +519,7 @@ function renderProduct(product) {
   const expanded = state.expandedResults.has(product.key);
   const unit = unitForProduct(product.name);
   const productPrices = pricesForProduct(product.name);
+  const productLabels = labelsForProduct(product.name);
   return `
     <article class="product-card ${expanded ? "expanded" : ""}">
       <button class="product-head product-toggle" type="button" data-key="${escapeHtml(product.key)}" aria-expanded="${expanded ? "true" : "false"}">
@@ -480,6 +531,7 @@ function renderProduct(product) {
             ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
           </div>
           ${productPrices.length ? `<div class="price-tags">${productPrices.slice(0, 2).map(renderPriceTag).join("")}</div>` : ""}
+          ${productLabels.length ? `<div class="label-tags"><span class="label-tag">${productLabels.length} etiqueta(s)</span></div>` : ""}
         </div>
         <span class="product-arrow" aria-hidden="true">⌄</span>
       </button>
@@ -494,7 +546,46 @@ function renderProduct(product) {
           </div>
         `).join("")}
       </div>
+      <div class="label-list" ${expanded && productLabels.length ? "" : "hidden"}>
+        <div class="label-list-title">Etiquetas do produto</div>
+        ${productLabels.slice(0, 8).map(renderProductLabel).join("")}
+        ${productLabels.length > 8 ? `<div class="label-more">Mostrando 8 de ${productLabels.length} etiqueta(s)</div>` : ""}
+      </div>
     </article>
+  `;
+}
+
+function labelsForProduct(productName) {
+  const normalizedName = normalize(productName);
+  return state.labels.filter((label) => {
+    const labelName = normalize(label.display_name || label.normalized_name || "");
+    return labelName === normalizedName || normalizedName.includes(labelName) || labelName.includes(normalizedName);
+  }).sort((a, b) => {
+    if (a.reference && !b.reference) return -1;
+    if (!a.reference && b.reference) return 1;
+    return String(a.display_name || "").localeCompare(String(b.display_name || ""));
+  });
+}
+
+function renderProductLabel(label) {
+  const photoUrl = label.drive_photo_id ? `https://drive.google.com/file/d/${encodeURIComponent(label.drive_photo_id)}/view` : "";
+  const details = [
+    label.reference ? `Ref: ${label.reference}` : "",
+    label.width ? `Largura: ${label.width}` : "",
+    label.weight ? `Gramatura: ${label.weight}` : "",
+    label.composition ? `Composição: ${label.composition}` : "",
+    label.origin ? `Origem: ${label.origin}` : "",
+  ].filter(Boolean);
+
+  return `
+    <div class="product-label-card">
+      <div>
+        <strong>${escapeHtml(label.display_name || "Etiqueta")}</strong>
+        ${details.length ? `<div class="label-details">${details.map(escapeHtml).join(" · ")}</div>` : ""}
+        ${label.ocr_text ? `<div class="label-ocr">${escapeHtml(label.ocr_text)}</div>` : ""}
+      </div>
+      ${photoUrl ? `<a class="label-photo-link" href="${photoUrl}" target="_blank" rel="noopener">Ver foto</a>` : ""}
+    </div>
   `;
 }
 

@@ -222,6 +222,8 @@ button.primary, #import-button {
 .tag.promo { background: #f0e6fb; color: #5b2c8a; }
 .price-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .price-tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 12px; background: #fff7db; color: var(--amber); }
+.label-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.label-tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 12px; background: #e9eef2; color: var(--ink); }
 
 .product-arrow {
   width: 32px;
@@ -244,6 +246,60 @@ button.primary, #import-button {
 
 .color-list {
   background: var(--card);
+}
+
+.label-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: #fbfbf7;
+}
+
+.label-list-title {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.product-label-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 12px;
+}
+
+.label-details {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.label-ocr {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.label-photo-link {
+  font-weight: 800;
+  color: var(--blue);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.label-more {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .color-row {

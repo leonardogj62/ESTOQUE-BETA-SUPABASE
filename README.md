@@ -109,10 +109,26 @@ Observação: a pasta `Fem. Promoção` hoje tem apenas PDFs. Ela foi tratada co
 
 ## Próximas fases recomendadas
 
-1. Importar etiquetas OCR para `product_labels`.
-2. Criar comparação entre snapshots por `stock_files`.
-3. Agendar a função `import-stock` por cron.
-4. Publicar o app web no GitHub Pages ou Vercel.
+1. Criar comparação entre snapshots por `stock_files`.
+2. Agendar a função `import-stock` por cron.
+3. Publicar o app web no GitHub Pages ou Vercel.
+
+## Etiquetas dos produtos
+
+O botão **Importar Etiquetas** lê recursivamente esta pasta do Drive:
+
+```text
+11msFrrRee3JfCMrl_-Ys64-UyYeV3LOt
+```
+
+As fotos renomeadas no padrão `BETA - PRODUTO - REF 0000.jpeg` entram em `product_labels`.
+No card de cada produto, o app mostra a quantidade de etiquetas, a referência e um link **Ver foto**.
+
+Para sobrescrever a pasta padrão, configure este secret na Edge Function:
+
+```text
+LABEL_DRIVE_FOLDER_ID
+```
 
 ## Tabela de preços
 

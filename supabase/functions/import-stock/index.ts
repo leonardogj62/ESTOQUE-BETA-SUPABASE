@@ -38,8 +38,10 @@ const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
 const DEFAULT_PRICE_DRIVE_FOLDER_ID = "1TLFeg3czJkesCOwFl7qMnTUB2B14xLKO";
+const DEFAULT_LABEL_DRIVE_FOLDER_ID = "11msFrrRee3JfCMrl_-Ys64-UyYeV3LOt";
 const PRICE_DRIVE_FILE_ID = Deno.env.get("PRICE_DRIVE_FILE_ID") || "";
 const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || DEFAULT_PRICE_DRIVE_FOLDER_ID;
+const LABEL_DRIVE_FOLDER_ID = Deno.env.get("LABEL_DRIVE_FOLDER_ID") || DEFAULT_LABEL_DRIVE_FOLDER_ID;
 
 let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
@@ -113,6 +115,22 @@ Deno.serve(async (req) => {
         .eq("id", runId);
 
       return json({ ok: priceResult.status !== "failed", run_id: runId, summary }, priceResult.status === "failed" ? 500 : 200);
+    }
+
+    if (params.action === "import_labels" || params.import_labels === true) {
+      const labelResult = await importLabels(token);
+      summary.push(labelResult);
+
+      await supabase
+        .from("import_runs")
+        .update({
+          status: labelResult.status === "failed" ? "failed" : "success",
+          summary,
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", runId);
+
+      return json({ ok: labelResult.status !== "failed", run_id: runId, summary }, labelResult.status === "failed" ? 500 : 200);
     }
 
     let sourceQuery = supabase
@@ -250,6 +268,49 @@ async function getLatestDriveFile(folderId: string, token: string) {
   return files[0] || null;
 }
 
+async function listDriveFolder(folderId: string, token: string) {
+  const files: DriveFile[] = [];
+  let pageToken = "";
+
+  do {
+    const q = `'${folderId}' in parents and trashed=false`;
+    const params: Record<string, string> = {
+      q,
+      fields: "nextPageToken,files(id,name,mimeType,modifiedTime)",
+      pageSize: "1000",
+    };
+    if (pageToken) params.pageToken = pageToken;
+
+    const url = "https://www.googleapis.com/drive/v3/files?" + new URLSearchParams(params);
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Drive list falhou: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+    files.push(...(data.files || []));
+    pageToken = data.nextPageToken || "";
+  } while (pageToken);
+
+  return files;
+}
+
+async function listDriveFilesRecursive(folderId: string, token: string, maxDepth = 3) {
+  const collected: DriveFile[] = [];
+
+  async function visit(currentFolderId: string, depth: number) {
+    if (depth > maxDepth) return;
+    const files = await listDriveFolder(currentFolderId, token);
+    for (const file of files) {
+      if (isDriveFolder(file)) {
+        await visit(file.id, depth + 1);
+      } else {
+        collected.push(file);
+      }
+    }
+  }
+
+  await visit(folderId, 0);
+  return collected;
+}
+
 async function getDriveFileById(fileId: string, token: string) {
   const url =
     `https://www.googleapis.com/drive/v3/files/${fileId}?` +
@@ -331,6 +392,39 @@ async function importPrices(token: string) {
   } catch (error) {
     await recordPriceFile(null, "failed", messageOf(error), []);
     return { source: "Tabela de preços", status: "failed", error: messageOf(error) };
+  }
+}
+
+async function importLabels(token: string) {
+  try {
+    if (!LABEL_DRIVE_FOLDER_ID) {
+      throw new Error("Configure LABEL_DRIVE_FOLDER_ID nos Secrets para importar etiquetas.");
+    }
+
+    const files = await listDriveFilesRecursive(LABEL_DRIVE_FOLDER_ID, token);
+    const labels = files
+      .filter(isImageFile)
+      .map(parseLabelFile)
+      .filter(Boolean) as Record<string, unknown>[];
+
+    if (!labels.length) {
+      return { source: "Etiquetas", status: "failed", error: "Nenhuma etiqueta reconhecida na pasta" };
+    }
+
+    const { error: deleteError } = await supabase
+      .from("product_labels")
+      .delete()
+      .not("drive_photo_id", "is", null);
+    if (deleteError) throw deleteError;
+
+    for (let i = 0; i < labels.length; i += 500) {
+      const { error } = await supabase.from("product_labels").insert(labels.slice(i, i + 500));
+      if (error) throw error;
+    }
+
+    return { source: "Etiquetas", status: "imported", labels: labels.length };
+  } catch (error) {
+    return { source: "Etiquetas", status: "failed", error: messageOf(error) };
   }
 }
 
@@ -961,6 +1055,45 @@ function isSpreadsheetFile(file: DriveFile) {
 
 function isPdfFile(file: DriveFile) {
   return file.mimeType === "application/pdf" || /\.pdf$/i.test(file.name || "");
+}
+
+function isDriveFolder(file: DriveFile) {
+  return file.mimeType === "application/vnd.google-apps.folder";
+}
+
+function isImageFile(file: DriveFile) {
+  return /^image\//.test(file.mimeType || "") || /\.(jpe?g|png|webp|heic)$/i.test(file.name || "");
+}
+
+function parseLabelFile(file: DriveFile) {
+  const name = String(file.name || "").replace(/\.[^.]+$/, "");
+  if (!/\bBETA\b/i.test(name)) return null;
+
+  const reference = name.match(/\bREF\s*[-:]?\s*([A-Z0-9.\/-]+)/i)?.[1] || "";
+  let product = name
+    .replace(/\bBETA\b/gi, " ")
+    .replace(/\bREF\s*[-:]?\s*[A-Z0-9.\/-]+/gi, " ")
+    .replace(/\bbeta\b/gi, " ")
+    .replace(/\bbata\b/gi, " ")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!product || /^IMG\s*\d+$/i.test(product)) return null;
+
+  return {
+    normalized_name: normalizeText(product),
+    display_name: product,
+    reference: reference || null,
+    width: null,
+    weight: null,
+    composition: null,
+    origin: null,
+    washing_instructions: [],
+    drive_photo_id: file.id,
+    ocr_text: name,
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function filePriority(file: DriveFile) {
