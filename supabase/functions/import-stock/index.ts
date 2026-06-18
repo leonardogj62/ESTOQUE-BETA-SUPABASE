@@ -63,6 +63,8 @@ Deno.serve(async (req) => {
     return json({ error: "Use POST" }, 405);
   }
 
+  const params = await readRequestJson(req);
+
   try {
     supabase = createSupabaseAdminClient();
   } catch (error) {
@@ -84,11 +86,17 @@ Deno.serve(async (req) => {
 
   try {
     const token = await getGoogleAccessToken();
-    const { data: sources, error: sourceError } = await supabase
+    let sourceQuery = supabase
       .from("stock_sources")
       .select("id, slug, label, drive_folder_id")
       .eq("active", true)
       .order("label");
+
+    if (typeof params.source_slug === "string" && params.source_slug !== "todos") {
+      sourceQuery = sourceQuery.eq("slug", params.source_slug);
+    }
+
+    const { data: sources, error: sourceError } = await sourceQuery;
 
     if (sourceError) throw sourceError;
 
@@ -285,8 +293,10 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) 
     quantity_meters: item.quantity,
   }));
 
-  const { error } = await supabase.from("stock_items").insert(rows);
-  if (error) throw error;
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await supabase.from("stock_items").insert(rows.slice(i, i + 500));
+    if (error) throw error;
+  }
 }
 
 function parseSpreadsheet(bytes: ArrayBuffer) {
@@ -401,20 +411,36 @@ function parsePdfText(text: string): ParsedItem[] {
   const lines = prepared.split(/\n+/).map(cleanText).filter(Boolean);
   const items: ParsedItem[] = [];
   let product = "";
+  let pendingColor = "";
 
   for (const line of lines) {
     const nameMatch = line.match(/^Nome\s*:\s*(.+)$/i);
     if (nameMatch) {
       product = cleanPdfProductName(nameMatch[1]);
+      pendingColor = "";
       continue;
     }
 
-    const colorMatch = line.match(/^Cor\s*:\s*(.+?)\s+(?:\(\d+\s+items?\)\s+)?([\d.]+,\d+)\s*$/i);
-    if (!colorMatch || !product) continue;
+    const colorMatch = line.match(/^Cor\s*:\s*(.+?)(?:\s+\(\d+\s+items?\))?(?:\s+([\d.]+,\d+))?\s*$/i);
+    if (colorMatch && product) {
+      const color = cleanPdfColorName(colorMatch[1]);
+      const inlineQuantity = parseNumber(colorMatch[2]);
+      if (color && inlineQuantity > 0) {
+        items.push({ product, color, process: "", quantity: inlineQuantity });
+        pendingColor = "";
+      } else {
+        pendingColor = color;
+      }
+      continue;
+    }
 
-    const color = cleanPdfColorName(colorMatch[1]);
-    const quantity = parseNumber(colorMatch[2]);
-    if (color && quantity > 0) items.push({ product, color, process: "", quantity });
+    if (pendingColor && product) {
+      const quantity = parseNumber(line);
+      if (quantity > 0) {
+        items.push({ product, color: pendingColor, process: "", quantity });
+        pendingColor = "";
+      }
+    }
   }
 
   return compactItems(items);
@@ -671,6 +697,15 @@ function messageOf(error: unknown) {
     return JSON.stringify(error);
   } catch {
     return String(error);
+  }
+}
+
+async function readRequestJson(req: Request) {
+  try {
+    const text = await req.text();
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {};
   }
 }
 

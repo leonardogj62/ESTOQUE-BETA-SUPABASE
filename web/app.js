@@ -78,7 +78,7 @@ async function loadHealth() {
 
 async function loadStock() {
   try {
-    return await supabaseSelect("v_stock_search", "select=*&order=product_name.asc");
+    return await supabaseSelectAll("v_stock_search", "select=*&order=product_name.asc");
   } catch (error) {
     els.status.textContent = "Erro ao carregar busca";
     console.error(error);
@@ -86,13 +86,29 @@ async function loadStock() {
   }
 }
 
-async function supabaseSelect(resource, query) {
+async function supabaseSelect(resource, query, range = null) {
+  const headers = { ...restHeaders };
+  if (range) headers.range = `${range.from}-${range.to}`;
+
   const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, {
-    headers: restHeaders,
+    headers,
   });
   const payload = await res.json();
   if (!res.ok) throw new Error(payload.message || "Consulta ao Supabase falhou");
   return payload || [];
+}
+
+async function supabaseSelectAll(resource, query) {
+  const rows = [];
+  const pageSize = 1000;
+
+  for (let from = 0; from < 50000; from += pageSize) {
+    const page = await supabaseSelect(resource, query, { from, to: from + pageSize - 1 });
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
 }
 
 async function runImport() {
@@ -110,9 +126,25 @@ async function runImport() {
     if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
       headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
     }
-    const res = await fetch(CONFIG.importFunctionUrl, { method: "POST", headers });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(readableError(payload.error || payload || "Importação falhou"));
+
+    const sources = state.health.length ? state.health : [{ slug: "todos", label: "Todos os estoques" }];
+    const failures = [];
+
+    for (const source of sources) {
+      els.status.textContent = `Importando ${source.label}...`;
+      const res = await fetch(CONFIG.importFunctionUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ source_slug: source.slug }),
+      });
+      const payload = await res.json();
+      if (!res.ok || payload.ok === false) {
+        failures.push(`${source.label}: ${readableError(payload.error || payload || "Importação falhou")}`);
+      }
+      await refreshAll();
+    }
+
+    if (failures.length) throw new Error(failures.join(" | "));
     await refreshAll();
   } catch (error) {
     els.status.textContent = readableError(error);
