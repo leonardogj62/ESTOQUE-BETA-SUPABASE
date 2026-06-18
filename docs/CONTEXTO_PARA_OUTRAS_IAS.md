@@ -534,3 +534,70 @@ Cuidados:
 - ao filtrar por fonte ou texto, a busca deve voltar fechada por padrao;
 - ao ativar Separar por processo, a busca tambem deve voltar fechada por padrao;
 - a busca por texto continua procurando produto, cor e processo.
+- produtos com nome contendo `malha` ou `malhas` devem mostrar quantidade em `kg`, nao em `m`.
+
+## Tabela de Precos
+
+Em 18/06/2026 foi iniciada a implementacao da tabela de precos.
+
+Comportamento esperado:
+
+```text
+1. Existe uma aba Precos.
+2. A aba permite importar a tabela de precos do Drive.
+3. A aba permite inserir preco manualmente.
+4. O preco manual aceita moeda BRL/R$ e USD/U$.
+5. Valores devem aparecer com duas casas decimais, exemplo: R$ 19,90 ou U$ 19,90.
+6. Comissoes variadas sao guardadas em JSON no campo commission_prices.
+7. A Busca mostra um resumo de preco no produto quando existe preco cadastrado.
+```
+
+Banco:
+
+```text
+price_files
+price_items
+```
+
+Campos importantes adicionados em `price_items`:
+
+```text
+currency
+commission_prices
+source_type
+updated_at
+```
+
+Arquivo de migracao separado:
+
+```text
+supabase/prices.sql
+```
+
+Edge Function:
+
+```text
+supabase/functions/import-stock/index.ts
+```
+
+A funcao aceita:
+
+```json
+{ "action": "import_prices" }
+```
+
+Secrets opcionais para importacao automatica:
+
+```text
+PRICE_DRIVE_FILE_ID
+PRICE_DRIVE_FOLDER_ID
+```
+
+Use `PRICE_DRIVE_FILE_ID` para apontar diretamente para a planilha de precos. Use `PRICE_DRIVE_FOLDER_ID` para pegar a planilha mais recente dentro de uma pasta.
+
+Observacao importante:
+
+```text
+O banco ja pode receber precos manuais depois de aplicar supabase/prices.sql.
+A importacao automatica pelo botao Importar Precos depende de publicar novamente a Edge Function import-stock no Supabase.
+```

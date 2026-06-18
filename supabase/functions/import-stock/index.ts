@@ -16,6 +16,15 @@ type ParsedItem = {
   quantity: number;
 };
 
+type ParsedPriceItem = {
+  product: string;
+  unit: string;
+  currency: "BRL" | "USD";
+  commissionPrices: Record<string, number>;
+  availability: string;
+  expectedArrival: string;
+};
+
 type DriveFile = {
   id: string;
   name: string;
@@ -28,6 +37,8 @@ const SUPABASE_SERVICE_ROLE_KEY = getSupabaseSecretKey();
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
+const PRICE_DRIVE_FILE_ID = Deno.env.get("PRICE_DRIVE_FILE_ID") || "";
+const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || "";
 
 let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
@@ -86,6 +97,23 @@ Deno.serve(async (req) => {
 
   try {
     const token = await getGoogleAccessToken();
+
+    if (params.action === "import_prices" || params.import_prices === true) {
+      const priceResult = await importPrices(token);
+      summary.push(priceResult);
+
+      await supabase
+        .from("import_runs")
+        .update({
+          status: priceResult.status === "failed" ? "failed" : "success",
+          summary,
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", runId);
+
+      return json({ ok: priceResult.status !== "failed", run_id: runId, summary }, priceResult.status === "failed" ? 500 : 200);
+    }
+
     let sourceQuery = supabase
       .from("stock_sources")
       .select("id, slug, label, drive_folder_id")
@@ -221,6 +249,45 @@ async function getLatestDriveFile(folderId: string, token: string) {
   return files[0] || null;
 }
 
+async function getDriveFileById(fileId: string, token: string) {
+  const url =
+    `https://www.googleapis.com/drive/v3/files/${fileId}?` +
+    new URLSearchParams({
+      fields: "id,name,mimeType,modifiedTime",
+    });
+
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Drive file falhou: ${res.status} ${await res.text()}`);
+  return await res.json() as DriveFile;
+}
+
+async function getLatestPriceDriveFile(token: string) {
+  if (PRICE_DRIVE_FILE_ID) {
+    return await getDriveFileById(PRICE_DRIVE_FILE_ID, token);
+  }
+
+  if (!PRICE_DRIVE_FOLDER_ID) {
+    throw new Error("Configure PRICE_DRIVE_FILE_ID ou PRICE_DRIVE_FOLDER_ID nos Secrets para importar tabela de preços.");
+  }
+
+  const q = `'${PRICE_DRIVE_FOLDER_ID}' in parents and trashed=false`;
+  const url =
+    "https://www.googleapis.com/drive/v3/files?" +
+    new URLSearchParams({
+      q,
+      orderBy: "modifiedTime desc",
+      fields: "files(id,name,mimeType,modifiedTime)",
+      pageSize: "30",
+    });
+
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Drive list de preços falhou: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  const files = (data.files || []).filter(isSpreadsheetFile);
+  files.sort((a: DriveFile, b: DriveFile) => dateScore(b) - dateScore(a));
+  return files[0] || null;
+}
+
 async function downloadDriveFile(file: any, token: string) {
   const url =
     file.mimeType === "application/vnd.google-apps.spreadsheet"
@@ -230,6 +297,91 @@ async function downloadDriveFile(file: any, token: string) {
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`Download falhou (${file.name}): ${res.status} ${await res.text()}`);
   return await res.arrayBuffer();
+}
+
+async function importPrices(token: string) {
+  try {
+    const file = await getLatestPriceDriveFile(token);
+    if (!file) {
+      await recordPriceFile(null, "failed", "Nenhuma planilha de preços encontrada", []);
+      return { source: "Tabela de preços", status: "failed", error: "Nenhuma planilha de preços encontrada" };
+    }
+
+    if (!isSpreadsheetFile(file)) {
+      throw new Error(`Arquivo de preços não é planilha: ${file.name}`);
+    }
+
+    const bytes = await downloadDriveFile(file, token);
+    const items = parsePriceSpreadsheet(bytes);
+    const fileRow = await recordPriceFile(file, items.length ? "imported" : "failed", items.length ? null : "Nenhum preço foi extraído", items);
+
+    if (items.length) {
+      await supabase.from("price_items").delete().eq("price_file_id", fileRow.id);
+      await insertPriceItems(fileRow.id, items);
+    }
+
+    return {
+      source: "Tabela de preços",
+      status: items.length ? "imported" : "failed",
+      file: file.name,
+      items: items.length,
+    };
+  } catch (error) {
+    await recordPriceFile(null, "failed", messageOf(error), []);
+    return { source: "Tabela de preços", status: "failed", error: messageOf(error) };
+  }
+}
+
+async function recordPriceFile(
+  file: DriveFile | null,
+  status: "imported" | "failed",
+  errorMessage: string | null,
+  items: ParsedPriceItem[],
+) {
+  const payload = {
+    drive_file_id: file?.id || `missing-price-${Date.now()}`,
+    file_name: file?.name || "Tabela de preços não encontrada",
+    imported_at: new Date().toISOString(),
+    status,
+    error_message: errorMessage,
+    item_count: items.length,
+  };
+
+  const { data, error } = await supabase
+    .from("price_files")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function insertPriceItems(priceFileId: string, items: ParsedPriceItem[]) {
+  const rows = items.map((item) => {
+    const values = Object.values(item.commissionPrices);
+    return {
+      price_file_id: priceFileId,
+      normalized_name: normalizeText(item.product),
+      display_name: item.product,
+      unit: item.unit || unitForProduct(item.product),
+      currency: item.currency,
+      commission_prices: item.commissionPrices,
+      price_1: values[0] ?? null,
+      price_2: values[1] ?? null,
+      price_3: values[2] ?? null,
+      price_4: values[3] ?? null,
+      availability: item.availability || null,
+      expected_arrival: item.expectedArrival || null,
+      source_type: "drive",
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await supabase.from("price_items").insert(rows.slice(i, i + 500));
+    if (error) throw error;
+  }
 }
 
 async function recordStockFile(
@@ -469,6 +621,145 @@ function parseWorkbook(workbook: XLSX.WorkBook): ParsedItem[] {
     if (tabular.length) return tabular;
   }
   return [];
+}
+
+function parsePriceSpreadsheet(bytes: ArrayBuffer) {
+  const workbook = XLSX.read(bytes, { type: "array" });
+  const items: ParsedPriceItem[] = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" }) as any[][];
+    items.push(...parsePriceRows(rows));
+  }
+
+  return compactPriceItems(items);
+}
+
+function parsePriceRows(rows: any[][]) {
+  let best: any = null;
+
+  for (let h = 0; h < Math.min(rows.length, 40); h++) {
+    const headers = rows[h].map(normalizeHeader);
+    const productCol = choosePriceColumn(headers, "product");
+    const priceCols = headers
+      .map((header, index) => ({ header, index }))
+      .filter(({ header, index }) => index !== productCol && isPriceHeader(header));
+
+    if (productCol < 0 || !priceCols.length) continue;
+    const score = priceCols.length * 5 + columnScore(headers[productCol], "product");
+    if (!best || score > best.score) {
+      best = {
+        row: h,
+        productCol,
+        unitCol: choosePriceColumn(headers, "unit"),
+        currencyCol: choosePriceColumn(headers, "currency"),
+        availabilityCol: choosePriceColumn(headers, "availability"),
+        expectedCol: choosePriceColumn(headers, "expected"),
+        priceCols,
+        score,
+      };
+    }
+  }
+
+  if (!best) return [];
+
+  const items: ParsedPriceItem[] = [];
+  for (let i = best.row + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const product = cleanText(row[best.productCol]);
+    if (!product || /^(TOTAL|SUBTOTAL|PRODUTO|DESCRICAO|NOME COMERCIAL)$/i.test(product)) continue;
+
+    const commissionPrices: Record<string, number> = {};
+    for (const col of best.priceCols) {
+      const price = parseNumber(row[col.index]);
+      if (!(price > 0)) continue;
+      const label = cleanCommissionLabel(col.header);
+      commissionPrices[label] = roundMoney(price);
+    }
+
+    if (!Object.keys(commissionPrices).length) continue;
+
+    const rowCurrency = best.currencyCol >= 0 ? parseCurrency(row[best.currencyCol]) : null;
+    const headerCurrency = parseCurrency(best.priceCols.map((col: any) => col.header).join(" "));
+    const currency = rowCurrency || headerCurrency || "BRL";
+
+    items.push({
+      product,
+      unit: best.unitCol >= 0 ? cleanText(row[best.unitCol]) : unitForProduct(product),
+      currency,
+      commissionPrices,
+      availability: best.availabilityCol >= 0 ? cleanText(row[best.availabilityCol]) : "",
+      expectedArrival: best.expectedCol >= 0 ? cleanText(row[best.expectedCol]) : "",
+    });
+  }
+
+  return items;
+}
+
+function compactPriceItems(items: ParsedPriceItem[]) {
+  const map = new Map<string, ParsedPriceItem>();
+  for (const item of items) {
+    const key = `${normalizeText(item.product)}||${item.currency}`;
+    const current = map.get(key);
+    if (current) {
+      current.commissionPrices = { ...current.commissionPrices, ...item.commissionPrices };
+      current.unit ||= item.unit;
+      current.availability ||= item.availability;
+      current.expectedArrival ||= item.expectedArrival;
+    } else {
+      map.set(key, { ...item, commissionPrices: { ...item.commissionPrices } });
+    }
+  }
+  return [...map.values()];
+}
+
+function choosePriceColumn(headers: string[], type: string) {
+  let best = -1;
+  let bestScore = 0;
+  headers.forEach((header, index) => {
+    let score = 0;
+    if (type === "product" && /\b(NOME COMERCIAL|NOME PRODUTO|PRODUTO|DESCRICAO|MATERIAL|ARTIGO|TECIDO|ITEM)\b/.test(header)) score = 5;
+    if (type === "unit" && /\b(UNIDADE|UNID|UND|UNIT|MEDIDA|UM)\b/.test(header)) score = 5;
+    if (type === "currency" && /\b(MOEDA|CURRENCY|CAMBIO)\b/.test(header)) score = 5;
+    if (type === "availability" && /\b(DISPONIBILIDADE|DISPONIVEL|STATUS|ENTREGA)\b/.test(header)) score = 5;
+    if (type === "expected" && /\b(PREVISAO|CHEGADA|ETA|PREVISTO)\b/.test(header)) score = 5;
+    if (score > bestScore) {
+      best = index;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+function isPriceHeader(header: string) {
+  if (!header) return false;
+  if (/\b(PRECO|PREÇO|VALOR|COMISSAO|COMISSAO|COMIS|R\$|U\$|USD|DOLAR|DOLLAR)\b/.test(header)) return true;
+  if (/%/.test(header)) return true;
+  return false;
+}
+
+function cleanCommissionLabel(header: string) {
+  const cleaned = cleanText(header)
+    .replace(/\b(PRECO|PREÇO|VALOR|COMISSAO|COMISSÃO|COMIS)\b/gi, "")
+    .replace(/\b(R\$|U\$|USD|BRL|DOLAR|DOLLAR)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "Preço";
+}
+
+function parseCurrency(value: unknown): "BRL" | "USD" | null {
+  const normalized = normalizeText(String(value || ""));
+  if (/\b(USD|DOLAR|DOLLAR|U)\b/.test(normalized) || /U\$/.test(String(value || ""))) return "USD";
+  if (/\b(BRL|REAL|REAIS|R)\b/.test(normalized) || /R\$/.test(String(value || ""))) return "BRL";
+  return null;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function unitForProduct(product: string) {
+  return /\bMALHAS?\b/i.test(normalizeText(product)) ? "kg" : "m";
 }
 
 function parseNomeCorProcesso(rows: any[][]): ParsedItem[] {

@@ -220,6 +220,8 @@ button.primary, #import-button {
 .tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 12px; background: #e6f1fb; color: var(--blue); }
 .tag.pe { background: #eaf3de; color: var(--green); }
 .tag.promo { background: #f0e6fb; color: #5b2c8a; }
+.price-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.price-tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 12px; background: #fff7db; color: var(--amber); }
 
 .product-arrow {
   width: 32px;
@@ -263,6 +265,108 @@ button.primary, #import-button {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+/* ---------- Preços ---------- */
+
+.price-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.price-toolbar select,
+.form-field input,
+.form-field select,
+.form-field textarea {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 8px;
+  font: inherit;
+  min-height: 42px;
+  padding: 9px 11px;
+  outline: 0;
+}
+
+.form-field textarea {
+  resize: vertical;
+  min-height: 108px;
+}
+
+.price-results {
+  display: grid;
+  gap: 8px;
+}
+
+.price-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  gap: 12px;
+  align-items: start;
+}
+
+.price-product {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.price-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.commission-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.commission-pill {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  min-width: 98px;
+  background: var(--soft);
+}
+
+.commission-pill span {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.commission-pill strong {
+  display: block;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.form-field {
+  display: grid;
+  gap: 5px;
+}
+
+.form-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 /* ---------- Mostruário: histórico ---------- */
@@ -471,6 +575,10 @@ button.primary, #import-button {
 
 @media (max-width: 760px) {
   .toolbar { grid-template-columns: 1fr; }
+  .price-toolbar { grid-template-columns: 1fr; }
+  .price-card { grid-template-columns: 1fr; }
+  .commission-grid { justify-content: flex-start; }
+  .form-grid { grid-template-columns: 1fr; }
   .health-grid { grid-template-columns: 1fr 1fr; }
   .diff-table { font-size: 12px; }
   .diff-table th, .diff-table td { padding: 7px 8px; }

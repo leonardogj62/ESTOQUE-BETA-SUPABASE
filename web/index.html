@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Estoque Beta Supabase</title>
-  <link rel="stylesheet" href="./styles.css?v=20260618-2">
-  <script defer src="./app.js?v=20260618-5"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260618-3">
+  <script defer src="./app.js?v=20260618-6"></script>
 </head>
 <body>
   <header class="topbar">
@@ -29,6 +29,7 @@
     <nav class="tabs" id="main-tabs">
       <button class="tab active" data-tab="busca" type="button">Busca</button>
       <button class="tab" data-tab="mostruario" type="button">Mostruário</button>
+      <button class="tab" data-tab="precos" type="button">Preços</button>
     </nav>
 
     <div id="tab-busca">
@@ -68,6 +69,29 @@
         <div id="showroom-diff"></div>
       </section>
     </div>
+
+    <div id="tab-precos" hidden>
+      <section>
+        <div class="section-title">
+          <h2>Tabela de Preços</h2>
+          <span id="price-count"></span>
+        </div>
+        <div class="price-toolbar">
+          <div class="search">
+            <span>⌕</span>
+            <input id="price-search-input" placeholder="Produto ou comissão">
+          </div>
+          <select id="price-currency-filter" aria-label="Moeda">
+            <option value="todos">R$ e U$</option>
+            <option value="BRL">R$</option>
+            <option value="USD">U$</option>
+          </select>
+          <button id="import-prices-button" type="button">Importar Preços</button>
+          <button id="new-price-button" class="primary" type="button">Inserir Manualmente</button>
+        </div>
+        <div id="price-results" class="price-results"></div>
+      </section>
+    </div>
   </main>
 
   <!-- Modal: seleção de produtos para mostruário -->
@@ -86,6 +110,58 @@
         <div class="modal-actions">
           <button id="cancel-update-btn" type="button">Cancelar</button>
           <button id="confirm-update-btn" class="primary" type="button" disabled>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: preço manual -->
+  <div id="price-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Inserir preço manual</h3>
+      </div>
+      <div class="modal-body">
+        <label class="form-field">
+          <span>Produto</span>
+          <input id="manual-price-product" placeholder="Nome do produto">
+        </label>
+        <div class="form-grid">
+          <label class="form-field">
+            <span>Unidade</span>
+            <select id="manual-price-unit">
+              <option value="m">m</option>
+              <option value="kg">kg</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Moeda</span>
+            <select id="manual-price-currency">
+              <option value="BRL">R$</option>
+              <option value="USD">U$</option>
+            </select>
+          </label>
+        </div>
+        <label class="form-field">
+          <span>Comissões e valores</span>
+          <textarea id="manual-price-commissions" rows="5" placeholder="0% = 19,90&#10;5% = 20,90"></textarea>
+        </label>
+        <div class="form-grid">
+          <label class="form-field">
+            <span>Disponibilidade</span>
+            <input id="manual-price-availability" placeholder="Pronta entrega, programação...">
+          </label>
+          <label class="form-field">
+            <span>Previsão</span>
+            <input id="manual-price-expected" placeholder="Data ou observação">
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="selector-help">Use vírgula nos centavos, exemplo: R$ 19,90.</span>
+        <div class="modal-actions">
+          <button id="cancel-price-btn" type="button">Cancelar</button>
+          <button id="save-price-btn" class="primary" type="button">Salvar</button>
         </div>
       </div>
     </div>

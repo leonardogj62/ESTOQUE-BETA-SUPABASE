@@ -80,15 +80,24 @@ create table if not exists public.price_items (
   normalized_name text not null,
   display_name text not null,
   unit text,
+  currency text not null default 'BRL' check (currency in ('BRL','USD')),
+  commission_prices jsonb not null default '{}'::jsonb,
   price_1 numeric(14,2),
   price_2 numeric(14,2),
   price_3 numeric(14,2),
   price_4 numeric(14,2),
   availability text,
-  expected_arrival text
+  expected_arrival text,
+  source_type text not null default 'drive' check (source_type in ('drive','manual')),
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists price_items_price_file_idx on public.price_items(price_file_id);
+create index if not exists price_items_normalized_idx on public.price_items(normalized_name);
+create index if not exists price_items_currency_idx on public.price_items(currency);
+create unique index if not exists price_items_manual_unique
+  on public.price_items(normalized_name, currency)
+  where source_type = 'manual';
 
 create table if not exists public.product_labels (
   id uuid primary key default gen_random_uuid(),
@@ -208,6 +217,8 @@ drop policy if exists "read stock items" on public.stock_items;
 drop policy if exists "read import runs" on public.import_runs;
 drop policy if exists "read price files" on public.price_files;
 drop policy if exists "read price items" on public.price_items;
+drop policy if exists "write price files" on public.price_files;
+drop policy if exists "write price items" on public.price_items;
 drop policy if exists "read product labels" on public.product_labels;
 
 create policy "read stock sources" on public.stock_sources for select using (true);
@@ -217,6 +228,8 @@ create policy "read stock items" on public.stock_items for select using (true);
 create policy "read import runs" on public.import_runs for select using (true);
 create policy "read price files" on public.price_files for select using (true);
 create policy "read price items" on public.price_items for select using (true);
+create policy "write price files" on public.price_files for all using (true) with check (true);
+create policy "write price items" on public.price_items for all using (true) with check (true);
 create policy "read product labels" on public.product_labels for select using (true);
 
 grant usage on schema public to anon, authenticated;
@@ -232,6 +245,10 @@ grant select on
   public.v_latest_stock_files,
   public.v_stock_search,
   public.v_source_health
+to anon, authenticated;
+grant insert, update, delete on
+  public.price_files,
+  public.price_items
 to anon, authenticated;
 grant execute on function public.search_stock(text) to anon, authenticated;
 

@@ -20,8 +20,11 @@ const writeHeaders = {
 const state = {
   rows: [],
   health: [],
+  prices: [],
   query: "",
   source: "todos",
+  priceQuery: "",
+  priceCurrency: "todos",
   groupByProcess: false,
   expandedResults: new Set(),
   expandedAllResults: false,
@@ -47,6 +50,22 @@ const els = {
   // abas
   tabBusca: document.getElementById("tab-busca"),
   tabMostruario: document.getElementById("tab-mostruario"),
+  tabPrecos: document.getElementById("tab-precos"),
+  priceSearch: document.getElementById("price-search-input"),
+  priceCurrencyFilter: document.getElementById("price-currency-filter"),
+  importPricesButton: document.getElementById("import-prices-button"),
+  newPriceButton: document.getElementById("new-price-button"),
+  priceResults: document.getElementById("price-results"),
+  priceCount: document.getElementById("price-count"),
+  priceModal: document.getElementById("price-modal"),
+  manualPriceProduct: document.getElementById("manual-price-product"),
+  manualPriceUnit: document.getElementById("manual-price-unit"),
+  manualPriceCurrency: document.getElementById("manual-price-currency"),
+  manualPriceCommissions: document.getElementById("manual-price-commissions"),
+  manualPriceAvailability: document.getElementById("manual-price-availability"),
+  manualPriceExpected: document.getElementById("manual-price-expected"),
+  cancelPriceBtn: document.getElementById("cancel-price-btn"),
+  savePriceBtn: document.getElementById("save-price-btn"),
   // mostruário
   newUpdateBtn: document.getElementById("new-update-btn"),
   showroomHistory: document.getElementById("showroom-history"),
@@ -87,6 +106,21 @@ function bindEvents() {
 
   els.refresh.addEventListener("click", refreshAll);
   els.importButton.addEventListener("click", runImport);
+  els.importPricesButton.addEventListener("click", runPriceImport);
+  els.newPriceButton.addEventListener("click", openPriceModal);
+  els.cancelPriceBtn.addEventListener("click", closePriceModal);
+  els.savePriceBtn.addEventListener("click", saveManualPrice);
+  els.priceModal.addEventListener("click", (event) => {
+    if (event.target === els.priceModal) closePriceModal();
+  });
+  els.priceSearch.addEventListener("input", () => {
+    state.priceQuery = els.priceSearch.value.trim();
+    renderPrices();
+  });
+  els.priceCurrencyFilter.addEventListener("change", () => {
+    state.priceCurrency = els.priceCurrencyFilter.value;
+    renderPrices();
+  });
   els.toggleAllProducts.addEventListener("click", toggleAllCurrentResults);
   els.groupProcessButton.addEventListener("click", () => {
     state.groupByProcess = !state.groupByProcess;
@@ -111,6 +145,7 @@ function bindEvents() {
     if (!btn) return;
     switchTab(btn.dataset.tab);
     if (btn.dataset.tab === "mostruario") loadAndRenderShowroom();
+    if (btn.dataset.tab === "precos") renderPrices();
   });
 
   // Mostruário
@@ -137,6 +172,7 @@ function bindEvents() {
 function switchTab(tabName) {
   els.tabBusca.hidden = tabName !== "busca";
   els.tabMostruario.hidden = tabName !== "mostruario";
+  els.tabPrecos.hidden = tabName !== "precos";
   document.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("active", t.dataset.tab === tabName);
   });
@@ -148,12 +184,14 @@ function switchTab(tabName) {
 
 async function refreshAll() {
   els.status.textContent = "Carregando dados...";
-  const [health, stock] = await Promise.all([loadHealth(), loadStock()]);
+  const [health, stock, prices] = await Promise.all([loadHealth(), loadStock(), loadPrices()]);
   state.health = health;
   state.rows = stock;
+  state.prices = prices;
   renderHealth();
   renderFilters();
   renderResults();
+  renderPrices();
   const lastImport = health.map((h) => h.imported_at).filter(Boolean).sort().at(-1);
   els.status.textContent = lastImport ? `Atualizado em ${formatDate(lastImport)}` : "Sem importação concluída";
 }
@@ -173,6 +211,15 @@ async function loadStock() {
     return await supabaseSelectAll("v_stock_search", "select=*&order=product_name.asc");
   } catch (error) {
     els.status.textContent = "Erro ao carregar busca";
+    console.error(error);
+    return [];
+  }
+}
+
+async function loadPrices() {
+  try {
+    return await supabaseSelectAll("price_items", "select=*&order=display_name.asc,updated_at.desc");
+  } catch (error) {
     console.error(error);
     return [];
   }
@@ -225,6 +272,44 @@ async function runImport() {
   }
 }
 
+async function runPriceImport() {
+  if (CONFIG.importFunctionUrl.startsWith("COLE_AQUI")) {
+    alert("Configure importFunctionUrl em web/app.js antes de importar.");
+    return;
+  }
+
+  els.importPricesButton.disabled = true;
+  els.importPricesButton.textContent = "Importando...";
+  els.status.textContent = "Importando tabela de preços...";
+
+  try {
+    const headers = { ...restHeaders, "content-type": "application/json" };
+    if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
+      headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
+    }
+
+    const res = await fetch(CONFIG.importFunctionUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "import_prices" }),
+    });
+    const payload = await res.json();
+    if (!res.ok || payload.ok === false) {
+      throw new Error(readableError(payload.error || payload || "Importação de preços falhou"));
+    }
+
+    state.prices = await loadPrices();
+    renderPrices();
+    renderResults();
+    els.status.textContent = "Tabela de preços importada";
+  } catch (error) {
+    els.status.textContent = readableError(error);
+  } finally {
+    els.importPricesButton.disabled = false;
+    els.importPricesButton.textContent = "Importar Preços";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Supabase: leitura
 // ---------------------------------------------------------------------------
@@ -265,6 +350,17 @@ async function supabaseInsert(resource, body) {
   const payload = await res.json();
   if (!res.ok) throw new Error(payload.message || "Escrita no Supabase falhou");
   return payload;
+}
+
+async function supabaseDelete(resource, query) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, {
+    method: "DELETE",
+    headers: writeHeaders,
+  });
+  if (!res.ok) {
+    const payload = await res.json();
+    throw new Error(payload.message || "Exclusão no Supabase falhou");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,16 +467,19 @@ function renderProduct(product) {
   const total = product.items.reduce((sum, item) => sum + Number(item.quantity_meters || 0), 0);
   const sources = [...new Map(product.items.map((i) => [i.source_label, i])).values()];
   const expanded = state.expandedResults.has(product.key);
+  const unit = unitForProduct(product.name);
+  const productPrices = pricesForProduct(product.name);
   return `
     <article class="product-card ${expanded ? "expanded" : ""}">
       <button class="product-head product-toggle" type="button" data-key="${escapeHtml(product.key)}" aria-expanded="${expanded ? "true" : "false"}">
         <div class="product-summary">
           <div class="product-name">${escapeHtml(product.name)}</div>
           ${product.subtitle ? `<div class="product-process">${escapeHtml(product.subtitle)}</div>` : ""}
-          <div class="product-total">${product.items.length} cor(es) · ${Math.round(total)} m</div>
+          <div class="product-total">${product.items.length} cor(es) · ${formatQuantity(total, unit)}</div>
           <div class="source-tags">
             ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
           </div>
+          ${productPrices.length ? `<div class="price-tags">${productPrices.slice(0, 2).map(renderPriceTag).join("")}</div>` : ""}
         </div>
         <span class="product-arrow" aria-hidden="true">⌄</span>
       </button>
@@ -391,7 +490,7 @@ function renderProduct(product) {
               <strong>${escapeHtml(item.color_name)}</strong>
               <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
             </div>
-            <div class="qty">${Math.round(Number(item.quantity_meters || 0))} m</div>
+            <div class="qty">${formatQuantity(Number(item.quantity_meters || 0), unitForProduct(item.product_name))}</div>
           </div>
         `).join("")}
       </div>
@@ -458,6 +557,208 @@ function updateResultControlLabels(groups) {
   const allVisibleOpen = groups.length > 0 && groups.every((group) => state.expandedResults.has(group.key));
   els.toggleAllProducts.textContent = allVisibleOpen ? "Fechar todos" : "Abrir todos";
   els.toggleAllProducts.disabled = groups.length === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Preços
+// ---------------------------------------------------------------------------
+
+function renderPrices() {
+  if (!els.priceResults) return;
+
+  const q = normalize(state.priceQuery);
+  const filtered = latestPrices().filter((price) => {
+    const byCurrency = state.priceCurrency === "todos" || price.currency === state.priceCurrency;
+    if (!byCurrency) return false;
+    if (!q) return true;
+    const commissions = Object.keys(readCommissionPrices(price)).join(" ");
+    return normalize(price.display_name).includes(q) || normalize(commissions).includes(q);
+  });
+
+  els.priceCount.textContent = `${filtered.length} preço(s)`;
+  if (!filtered.length) {
+    els.priceResults.innerHTML = `
+      <div class="empty">
+        <strong>Nenhum preço encontrado</strong>
+        <p>Importe a tabela do Drive ou insira um preço manualmente.</p>
+      </div>`;
+    return;
+  }
+
+  els.priceResults.innerHTML = filtered.map(renderPriceCard).join("");
+}
+
+function latestPrices() {
+  const map = new Map();
+  for (const price of state.prices) {
+    const key = `${price.normalized_name}|||${price.currency}`;
+    const current = map.get(key);
+    if (!current || priceRank(price) > priceRank(current)) map.set(key, price);
+  }
+  return [...map.values()].sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
+}
+
+function priceRank(price) {
+  const sourceWeight = price.source_type === "manual" ? 2 : 1;
+  return sourceWeight * 1e15 + new Date(price.updated_at || 0).getTime();
+}
+
+function pricesForProduct(productName) {
+  const normalized = normalize(productName);
+  return latestPrices().filter((price) => price.normalized_name === normalized);
+}
+
+function renderPriceCard(price) {
+  const commissions = readCommissionPrices(price);
+  return `
+    <article class="price-card">
+      <div>
+        <div class="price-product">${escapeHtml(price.display_name)}</div>
+        <div class="price-meta">
+          ${escapeHtml(price.unit || unitForProduct(price.display_name))} · ${currencyLabel(price.currency)}
+          ${price.availability ? ` · ${escapeHtml(price.availability)}` : ""}
+          ${price.expected_arrival ? ` · ${escapeHtml(price.expected_arrival)}` : ""}
+          ${price.source_type === "manual" ? " · manual" : " · Drive"}
+        </div>
+      </div>
+      <div class="commission-grid">
+        ${Object.entries(commissions).map(([label, value]) => `
+          <div class="commission-pill">
+            <span>${escapeHtml(label)}</span>
+            <strong>${formatMoney(value, price.currency)}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderPriceTag(price) {
+  const commissions = readCommissionPrices(price);
+  const first = Object.entries(commissions)[0];
+  if (!first) return "";
+  return `<span class="price-tag">${currencyLabel(price.currency)} ${escapeHtml(first[0])}: ${formatMoney(first[1], price.currency)}</span>`;
+}
+
+function readCommissionPrices(price) {
+  if (price.commission_prices && typeof price.commission_prices === "object") {
+    return price.commission_prices;
+  }
+  const fallback = {};
+  ["price_1", "price_2", "price_3", "price_4"].forEach((field, index) => {
+    if (price[field] != null) fallback[`Preço ${index + 1}`] = Number(price[field]);
+  });
+  return fallback;
+}
+
+function openPriceModal() {
+  els.manualPriceProduct.value = "";
+  els.manualPriceUnit.value = "m";
+  els.manualPriceCurrency.value = "BRL";
+  els.manualPriceCommissions.value = "";
+  els.manualPriceAvailability.value = "";
+  els.manualPriceExpected.value = "";
+  els.savePriceBtn.textContent = "Salvar";
+  els.priceModal.hidden = false;
+  els.manualPriceProduct.focus();
+}
+
+function closePriceModal() {
+  els.priceModal.hidden = true;
+  els.savePriceBtn.textContent = "Salvar";
+}
+
+async function saveManualPrice() {
+  const product = els.manualPriceProduct.value.trim();
+  const currency = els.manualPriceCurrency.value;
+  const commissions = parseCommissionInput(els.manualPriceCommissions.value);
+  if (!product) {
+    alert("Informe o nome do produto.");
+    return;
+  }
+  if (!Object.keys(commissions).length) {
+    alert("Informe pelo menos uma comissão e valor.");
+    return;
+  }
+
+  els.savePriceBtn.disabled = true;
+  els.savePriceBtn.textContent = "Salvando...";
+
+  try {
+    const normalized = normalize(product);
+    await supabaseDelete(
+      "price_items",
+      `source_type=eq.manual&normalized_name=eq.${encodeURIComponent(normalized)}&currency=eq.${encodeURIComponent(currency)}`
+    );
+
+    const values = Object.values(commissions);
+    await supabaseInsert("price_items", {
+      normalized_name: normalized,
+      display_name: product,
+      unit: els.manualPriceUnit.value,
+      currency,
+      commission_prices: commissions,
+      price_1: values[0] ?? null,
+      price_2: values[1] ?? null,
+      price_3: values[2] ?? null,
+      price_4: values[3] ?? null,
+      availability: els.manualPriceAvailability.value.trim() || null,
+      expected_arrival: els.manualPriceExpected.value.trim() || null,
+      source_type: "manual",
+      updated_at: new Date().toISOString(),
+    });
+
+    closePriceModal();
+    state.prices = await loadPrices();
+    renderPrices();
+    renderResults();
+  } catch (error) {
+    alert("Erro ao salvar preço: " + readableError(error));
+  } finally {
+    els.savePriceBtn.disabled = false;
+    els.savePriceBtn.textContent = "Salvar";
+  }
+}
+
+function parseCommissionInput(value) {
+  const result = {};
+  const lines = String(value || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(/^(.+?)(?:=|:|-)\s*(.+)$/);
+    if (!match) continue;
+    const label = match[1].trim();
+    const amount = parseMoney(match[2]);
+    if (label && amount > 0) result[label] = amount;
+  }
+  return result;
+}
+
+function parseMoney(value) {
+  let raw = String(value || "").trim().replace(/[^\d,.\-]/g, "");
+  if (!raw) return NaN;
+  if (raw.includes(",")) raw = raw.replace(/\./g, "").replace(",", ".");
+  return Math.round(Number.parseFloat(raw) * 100) / 100;
+}
+
+function formatMoney(value, currency) {
+  const symbol = currency === "USD" ? "U$" : "R$";
+  const formatted = Number(value || 0).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${symbol} ${formatted}`;
+}
+
+function currencyLabel(currency) {
+  return currency === "USD" ? "U$" : "R$";
+}
+
+function formatQuantity(value, unit) {
+  return `${Math.round(Number(value || 0))} ${unit}`;
+}
+
+function unitForProduct(productName) {
+  return /\bMALHAS?\b/.test(normalize(productName)) ? "kg" : "m";
 }
 
 // ---------------------------------------------------------------------------
