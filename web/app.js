@@ -28,6 +28,7 @@ const state = {
   priceCurrency: "todos",
   groupByProcess: false,
   expandedResults: new Set(),
+  expandedWashing: new Set(),
   expandedAllResults: false,
   showroom: {
     updates: [],
@@ -132,6 +133,14 @@ function bindEvents() {
   });
   els.results.addEventListener("click", (event) => {
     const target = event.target;
+    const washingBtn = target instanceof Element
+      ? target.closest(".washing-toggle")
+      : target?.parentElement?.closest(".washing-toggle");
+    if (washingBtn) {
+      toggleWashingBlock(washingBtn.dataset.key);
+      return;
+    }
+
     const btn = target instanceof Element
       ? target.closest(".product-toggle")
       : target?.parentElement?.closest(".product-toggle");
@@ -521,6 +530,7 @@ function renderProduct(product) {
   const productPrices = pricesForProduct(product.name);
   const productLabels = labelsForProduct(product.name);
   const primaryLabel = primaryLabelForProduct(productLabels);
+  const washingOpen = state.expandedWashing.has(product.key);
   return `
     <article class="product-card ${expanded ? "expanded" : ""}">
       <button class="product-head product-toggle" type="button" data-key="${escapeHtml(product.key)}" aria-expanded="${expanded ? "true" : "false"}">
@@ -536,6 +546,7 @@ function renderProduct(product) {
         </div>
         <span class="product-arrow" aria-hidden="true">⌄</span>
       </button>
+      ${primaryLabel ? renderWashingPanel(primaryLabel, product.key, washingOpen) : ""}
       <div class="color-list" ${expanded ? "" : "hidden"}>
         ${product.items.map((item) => `
           <div class="color-row">
@@ -591,14 +602,29 @@ function renderLabelHeader(label) {
     label.width ? `Larg. ${label.width}` : null,
     label.weight ? `Gram. ${label.weight}` : null,
   ].filter(Boolean);
-  const composition = shortComposition(label.composition);
-  const washIcons = renderWashingIcons(label.washing_instructions, 6);
+  const composition = fullComposition(label.composition);
 
   return `
     <div class="label-header">
       ${facts.length ? `<div class="label-tech-line">${escapeHtml(facts.join(" · "))}</div>` : ""}
       ${composition ? `<div class="label-composition">${escapeHtml(composition)}</div>` : ""}
-      ${washIcons}
+    </div>
+  `;
+}
+
+function renderWashingPanel(label, productKey, open) {
+  const instructions = normalizeWashingInstructions(label.washing_instructions);
+  if (!instructions.length) return "";
+
+  return `
+    <div class="washing-panel">
+      <button class="washing-toggle" type="button" data-key="${escapeHtml(productKey)}" aria-expanded="${open ? "true" : "false"}">
+        ${open ? "Ocultar modo de lavagem" : "Mostrar modo de lavagem"}
+      </button>
+      <div class="washing-content" ${open ? "" : "hidden"}>
+        ${renderWashingIcons(instructions, 20)}
+        <div class="washing-text">${instructions.map(escapeHtml).join(" · ")}</div>
+      </div>
     </div>
   `;
 }
@@ -625,11 +651,10 @@ function renderProductLabel(label) {
   `;
 }
 
-function shortComposition(composition) {
+function fullComposition(composition) {
   if (!composition) return "";
   const parts = String(composition).split(";").map((part) => part.trim()).filter(Boolean);
-  if (parts.length <= 2) return parts.join(" · ");
-  return `${parts.slice(0, 2).join(" · ")} · +${parts.length - 2}`;
+  return parts.length ? parts.join(" · ") : String(composition).trim();
 }
 
 function renderWashingIcons(instructions, limit = 6) {
@@ -690,15 +715,18 @@ function resultKey(...parts) {
 
 function resetResultExpansion() {
   state.expandedResults = new Set();
+  state.expandedWashing = new Set();
   state.expandedAllResults = false;
 }
 
 function syncExpandedResults(groups) {
+  const validKeys = new Set(groups.map((group) => group.key));
+  state.expandedWashing = new Set([...state.expandedWashing].filter((key) => validKeys.has(key)));
+
   if (state.expandedAllResults) {
     state.expandedResults = new Set(groups.map((group) => group.key));
     return;
   }
-  const validKeys = new Set(groups.map((group) => group.key));
   state.expandedResults = new Set([...state.expandedResults].filter((key) => validKeys.has(key)));
 }
 
@@ -710,6 +738,16 @@ function toggleProductBlock(key) {
     state.expandedResults.add(key);
   }
   state.expandedAllResults = false;
+  renderResults();
+}
+
+function toggleWashingBlock(key) {
+  if (!key) return;
+  if (state.expandedWashing.has(key)) {
+    state.expandedWashing.delete(key);
+  } else {
+    state.expandedWashing.add(key);
+  }
   renderResults();
 }
 
