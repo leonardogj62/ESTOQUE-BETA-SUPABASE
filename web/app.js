@@ -558,11 +558,6 @@ function renderProduct(product) {
           </div>
         `).join("")}
       </div>
-      <div class="label-list" ${expanded && productLabels.length ? "" : "hidden"}>
-        <div class="label-list-title">Etiquetas do produto</div>
-        ${productLabels.slice(0, 8).map(renderProductLabel).join("")}
-        ${productLabels.length > 8 ? `<div class="label-more">Mostrando 8 de ${productLabels.length} etiqueta(s)</div>` : ""}
-      </div>
     </article>
   `;
 }
@@ -625,28 +620,6 @@ function renderWashingPanel(label, productKey, open) {
         ${renderWashingIcons(instructions, 20)}
         <div class="washing-text">${instructions.map(escapeHtml).join(" · ")}</div>
       </div>
-    </div>
-  `;
-}
-
-function renderProductLabel(label) {
-  const photoUrl = label.drive_photo_id ? `https://drive.google.com/file/d/${encodeURIComponent(label.drive_photo_id)}/view` : "";
-  const details = [
-    label.reference ? `Ref: ${label.reference}` : "",
-    label.width ? `Largura: ${label.width}` : "",
-    label.weight ? `Gramatura: ${label.weight}` : "",
-    label.composition ? `Composição: ${label.composition}` : "",
-  ].filter(Boolean);
-
-  return `
-    <div class="product-label-card">
-      <div>
-        <strong>${escapeHtml(label.display_name || "Etiqueta")}</strong>
-        ${details.length ? `<div class="label-details">${details.map(escapeHtml).join(" · ")}</div>` : ""}
-        ${renderWashingIcons(label.washing_instructions, 10)}
-        ${label.ocr_text ? `<div class="label-ocr">${escapeHtml(label.ocr_text)}</div>` : ""}
-      </div>
-      ${photoUrl ? `<a class="label-photo-link" href="${photoUrl}" target="_blank" rel="noopener">Ver foto</a>` : ""}
     </div>
   `;
 }
