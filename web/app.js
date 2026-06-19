@@ -520,6 +520,7 @@ function renderProduct(product) {
   const unit = unitForProduct(product.name);
   const productPrices = pricesForProduct(product.name);
   const productLabels = labelsForProduct(product.name);
+  const primaryLabel = primaryLabelForProduct(productLabels);
   return `
     <article class="product-card ${expanded ? "expanded" : ""}">
       <button class="product-head product-toggle" type="button" data-key="${escapeHtml(product.key)}" aria-expanded="${expanded ? "true" : "false"}">
@@ -531,7 +532,7 @@ function renderProduct(product) {
             ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
           </div>
           ${productPrices.length ? `<div class="price-tags">${productPrices.slice(0, 2).map(renderPriceTag).join("")}</div>` : ""}
-          ${productLabels.length ? `<div class="label-tags"><span class="label-tag">${productLabels.length} etiqueta(s)</span></div>` : ""}
+          ${primaryLabel ? renderLabelHeader(primaryLabel, productLabels.length) : ""}
         </div>
         <span class="product-arrow" aria-hidden="true">⌄</span>
       </button>
@@ -561,10 +562,51 @@ function labelsForProduct(productName) {
     const labelName = normalize(label.display_name || label.normalized_name || "");
     return labelName === normalizedName || normalizedName.includes(labelName) || labelName.includes(normalizedName);
   }).sort((a, b) => {
+    const scoreDiff = labelScore(b) - labelScore(a);
+    if (scoreDiff) return scoreDiff;
     if (a.reference && !b.reference) return -1;
     if (!a.reference && b.reference) return 1;
     return String(a.display_name || "").localeCompare(String(b.display_name || ""));
   });
+}
+
+function labelScore(label) {
+  return [
+    label.reference,
+    label.width,
+    label.weight,
+    label.composition,
+    label.origin,
+    Array.isArray(label.washing_instructions) && label.washing_instructions.length,
+  ].filter(Boolean).length;
+}
+
+function primaryLabelForProduct(labels) {
+  return labels.find((label) => labelScore(label) > 1) || labels[0] || null;
+}
+
+function renderLabelHeader(label, count) {
+  const facts = [
+    label.reference ? ["Ref", label.reference] : null,
+    label.width ? ["Larg.", label.width] : null,
+    label.weight ? ["Gram.", label.weight] : null,
+    label.origin ? ["Origem", label.origin] : null,
+  ].filter(Boolean);
+  const composition = shortComposition(label.composition);
+  const washIcons = renderWashingIcons(label.washing_instructions, 6);
+
+  return `
+    <div class="label-header">
+      <div class="label-header-main">
+        ${facts.map(([name, value]) => `
+          <span class="label-fact"><span>${escapeHtml(name)}</span>${escapeHtml(value)}</span>
+        `).join("")}
+        ${count > 1 ? `<span class="label-fact muted"><span>Etiq.</span>${count}</span>` : ""}
+      </div>
+      ${composition ? `<div class="label-composition">${escapeHtml(composition)}</div>` : ""}
+      ${washIcons}
+    </div>
+  `;
 }
 
 function renderProductLabel(label) {
@@ -582,11 +624,66 @@ function renderProductLabel(label) {
       <div>
         <strong>${escapeHtml(label.display_name || "Etiqueta")}</strong>
         ${details.length ? `<div class="label-details">${details.map(escapeHtml).join(" · ")}</div>` : ""}
+        ${renderWashingIcons(label.washing_instructions, 10)}
         ${label.ocr_text ? `<div class="label-ocr">${escapeHtml(label.ocr_text)}</div>` : ""}
       </div>
       ${photoUrl ? `<a class="label-photo-link" href="${photoUrl}" target="_blank" rel="noopener">Ver foto</a>` : ""}
     </div>
   `;
+}
+
+function shortComposition(composition) {
+  if (!composition) return "";
+  const parts = String(composition).split(";").map((part) => part.trim()).filter(Boolean);
+  if (parts.length <= 2) return parts.join(" · ");
+  return `${parts.slice(0, 2).join(" · ")} · +${parts.length - 2}`;
+}
+
+function renderWashingIcons(instructions, limit = 6) {
+  const items = normalizeWashingInstructions(instructions)
+    .map(washingIconFor)
+    .filter(Boolean);
+  if (!items.length) return "";
+  return `
+    <div class="washing-icons" aria-label="Modos de lavagem">
+      ${items.slice(0, limit).map((item) => `
+        <span class="wash-icon" title="${escapeAttr(item.label)}" aria-label="${escapeAttr(item.label)}">${escapeHtml(item.icon)}</span>
+      `).join("")}
+      ${items.length > limit ? `<span class="wash-icon more" title="${items.length - limit} modo(s) a mais">+${items.length - limit}</span>` : ""}
+    </div>
+  `;
+}
+
+function normalizeWashingInstructions(instructions) {
+  if (!instructions) return [];
+  if (Array.isArray(instructions)) return instructions.map(String).map((item) => item.trim()).filter(Boolean);
+  if (typeof instructions === "string") {
+    try {
+      const parsed = JSON.parse(instructions);
+      if (Array.isArray(parsed)) return normalizeWashingInstructions(parsed);
+    } catch (_) {
+      return instructions.split(";").map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function washingIconFor(instruction) {
+  const text = normalize(instruction);
+  if (!text) return null;
+  if (text.includes("30") || text.includes("lavar ate 30")) return { icon: "30°", label: instruction };
+  if (text.includes("mao")) return { icon: "M", label: instruction };
+  if (text.includes("nao alvejar")) return { icon: "△×", label: instruction };
+  if (text.includes("nao secar em tambor")) return { icon: "□×", label: instruction };
+  if (text.includes("secar em tambor")) return { icon: "□•", label: instruction };
+  if (text.includes("secagem vertical")) return { icon: "▯│", label: instruction };
+  if (text.includes("secagem horizontal")) return { icon: "▯─", label: instruction };
+  if (text.includes("passar baixa")) return { icon: "Fe", label: instruction };
+  if (text.includes("nao passar")) return { icon: "Fe×", label: instruction };
+  if (text.includes("nao lavar a seco")) return { icon: "P×", label: instruction };
+  if (text.includes("lavagem a seco")) return { icon: "P", label: instruction };
+  if (text.includes("limpeza profissional a umido") || /\bw\b/i.test(instruction)) return { icon: "W", label: instruction };
+  return { icon: "i", label: instruction };
 }
 
 function renderEmpty(title, detail) {
@@ -1267,4 +1364,8 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#39;",
   }[char]));
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
 }

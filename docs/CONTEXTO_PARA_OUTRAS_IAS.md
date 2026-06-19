@@ -635,4 +635,6 @@ A funcao lista a pasta de etiquetas recursivamente, ignora fotos brutas IMG_...,
 O parser espera nomes como BETA - PRODUTO - REF 0000.jpeg.
 As linhas entram em public.product_labels com display_name, normalized_name, reference, drive_photo_id e ocr_text.
 O app carrega product_labels em refreshAll e mostra as etiquetas dentro dos cards de produto expandidos.
+Depois foi adicionada a planilha `ETIQUETAS BETA FEMININO.xlsx` como fonte correta de dados tecnicos: referencia, largura, gramatura, composicao e `washing_instructions`.
+Esses dados aparecem no cabecalho do card do produto, com icones compactos para modos de lavagem; fotos continuam aparecendo como link Ver foto quando houver `drive_photo_id`.
 ```

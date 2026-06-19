@@ -122,7 +122,10 @@ O botão **Importar Etiquetas** lê recursivamente esta pasta do Drive:
 ```
 
 As fotos renomeadas no padrão `BETA - PRODUTO - REF 0000.jpeg` entram em `product_labels`.
-No card de cada produto, o app mostra a quantidade de etiquetas, a referência e um link **Ver foto**.
+Também foram carregadas as linhas da planilha `ETIQUETAS BETA FEMININO.xlsx`, que preenchem referência, largura, gramatura, composição e modos de lavagem.
+No card de cada produto, o app mostra esses dados técnicos no cabeçalho; ao abrir o card, aparecem os detalhes e o link **Ver foto** quando a etiqueta veio de imagem.
+
+Os modos de lavagem ficam salvos em `washing_instructions` e são exibidos como ícones compactos no card.
 
 Para sobrescrever a pasta padrão, configure este secret na Edge Function:
 
