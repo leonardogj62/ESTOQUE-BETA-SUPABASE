@@ -585,24 +585,18 @@ function primaryLabelForProduct(labels) {
   return labels.find((label) => labelScore(label) > 1) || labels[0] || null;
 }
 
-function renderLabelHeader(label, count) {
+function renderLabelHeader(label) {
   const facts = [
-    label.reference ? ["Ref", label.reference] : null,
-    label.width ? ["Larg.", label.width] : null,
-    label.weight ? ["Gram.", label.weight] : null,
-    label.origin ? ["Origem", label.origin] : null,
+    label.reference ? `Ref ${label.reference}` : null,
+    label.width ? `Larg. ${label.width}` : null,
+    label.weight ? `Gram. ${label.weight}` : null,
   ].filter(Boolean);
   const composition = shortComposition(label.composition);
   const washIcons = renderWashingIcons(label.washing_instructions, 6);
 
   return `
     <div class="label-header">
-      <div class="label-header-main">
-        ${facts.map(([name, value]) => `
-          <span class="label-fact"><span>${escapeHtml(name)}</span>${escapeHtml(value)}</span>
-        `).join("")}
-        ${count > 1 ? `<span class="label-fact muted"><span>Etiq.</span>${count}</span>` : ""}
-      </div>
+      ${facts.length ? `<div class="label-tech-line">${escapeHtml(facts.join(" · "))}</div>` : ""}
       ${composition ? `<div class="label-composition">${escapeHtml(composition)}</div>` : ""}
       ${washIcons}
     </div>
@@ -616,7 +610,6 @@ function renderProductLabel(label) {
     label.width ? `Largura: ${label.width}` : "",
     label.weight ? `Gramatura: ${label.weight}` : "",
     label.composition ? `Composição: ${label.composition}` : "",
-    label.origin ? `Origem: ${label.origin}` : "",
   ].filter(Boolean);
 
   return `
@@ -669,17 +662,17 @@ function normalizeWashingInstructions(instructions) {
 }
 
 function washingIconFor(instruction) {
-  const text = normalize(instruction);
+  const text = normalize(instruction).toLowerCase();
   if (!text) return null;
   if (text.includes("30") || text.includes("lavar ate 30")) return { icon: "30°", label: instruction };
-  if (text.includes("mao")) return { icon: "M", label: instruction };
+  if (text.includes("mao")) return { icon: "✋", label: instruction };
   if (text.includes("nao alvejar")) return { icon: "△×", label: instruction };
-  if (text.includes("nao secar em tambor")) return { icon: "□×", label: instruction };
-  if (text.includes("secar em tambor")) return { icon: "□•", label: instruction };
+  if (text.includes("nao secar em tambor")) return { icon: "▢○×", label: instruction };
+  if (text.includes("secar em tambor")) return { icon: "▢○•", label: instruction };
   if (text.includes("secagem vertical")) return { icon: "▯│", label: instruction };
   if (text.includes("secagem horizontal")) return { icon: "▯─", label: instruction };
-  if (text.includes("passar baixa")) return { icon: "Fe", label: instruction };
-  if (text.includes("nao passar")) return { icon: "Fe×", label: instruction };
+  if (text.includes("passar baixa") || text.includes("passar em baixa")) return { icon: "♨", label: instruction };
+  if (text.includes("nao passar")) return { icon: "♨×", label: instruction };
   if (text.includes("nao lavar a seco")) return { icon: "P×", label: instruction };
   if (text.includes("lavagem a seco")) return { icon: "P", label: instruction };
   if (text.includes("limpeza profissional a umido") || /\bw\b/i.test(instruction)) return { icon: "W", label: instruction };
@@ -825,7 +818,7 @@ function renderPriceTag(price) {
   const commissions = readCommissionPrices(price);
   const first = Object.entries(commissions)[0];
   if (!first) return "";
-  return `<span class="price-tag">${currencyLabel(price.currency)} ${escapeHtml(first[0])}: ${formatMoney(first[1], price.currency)}</span>`;
+  return `<span class="price-tag">${formatMoney(first[1], price.currency)}</span>`;
 }
 
 function readCommissionPrices(price) {
