@@ -1,6 +1,19 @@
-# Estoque Beta Supabase
+# Gestão Comercial Multiempresa
 
 Nova base do Estoque Beta com Supabase como banco central e importação separada dos arquivos do Google Drive.
+
+Desde a versão `v0.2`, o projeto é multiempresa. A Beta Importadora continua com todos os dados anteriores e novas empresas podem ser cadastradas sem misturar produtos, estoque, preços, etiquetas ou mostruário.
+
+## Estrutura multiempresa
+
+- `organizations`: o escritório de representação que utiliza o sistema;
+- `companies`: as empresas representadas, como a Beta Importadora;
+- `organization_members`: usuários e funções de acesso;
+- cada produto, fonte, estoque, preço, etiqueta, importação e atualização de mostruário possui empresa;
+- clientes, fornecedores, transportadoras e vendedores pertencem ao escritório e podem ser usados em futuras vendas e pedidos;
+- a Beta permite consulta pública, mas importações e alterações exigem acesso administrativo.
+
+O cabeçalho do app possui um seletor de empresa. A área **Cadastros** contém empresas, produtos, clientes, fornecedores, transportadoras e vendedores.
 
 ## O que este projeto resolve
 
@@ -34,7 +47,8 @@ ESTOQUE-BETA-SUPABASE/
 No painel do Supabase, crie um projeto novo e rode no SQL Editor:
 
 1. `supabase/schema.sql`
-2. `supabase/seed_sources.sql`
+2. os arquivos de `supabase/migrations/`, em ordem
+3. `supabase/seed_sources.sql`
 
 Isso cria:
 
@@ -46,6 +60,8 @@ Isso cria:
 - etiquetas;
 - logs de importação;
 - views de busca e saúde.
+
+No primeiro acesso administrativo, use o e-mail convidado na migração multiempresa e clique em **Criar acesso**. Depois da confirmação do e-mail, esse usuário recebe a função de proprietário do escritório.
 
 Se preferir usar CLI, instale o Supabase CLI e use o roteiro em `scripts/deploy_supabase.example.sh`.
 
@@ -109,9 +125,11 @@ Observação: a pasta `Fem. Promoção` hoje tem apenas PDFs. Ela foi tratada co
 
 ## Próximas fases recomendadas
 
-1. Criar comparação entre snapshots por `stock_files`.
-2. Agendar a função `import-stock` por cron.
-3. Publicar o app web no GitHub Pages ou Vercel.
+1. Cadastro de pedidos e itens de pedido.
+2. Relacionamento entre clientes, vendedores e empresas representadas.
+3. Agenda comercial e histórico de contatos.
+4. Contas a receber, comissões e relatórios.
+5. Agendar a função `import-stock` por cron.
 
 ## Etiquetas dos produtos
 

@@ -638,3 +638,43 @@ O app carrega product_labels em refreshAll e mostra as etiquetas dentro dos card
 Depois foi adicionada a planilha `ETIQUETAS BETA FEMININO.xlsx` como fonte correta de dados tecnicos: referencia, largura, gramatura, composicao e `washing_instructions`.
 Esses dados aparecem no cabecalho do card do produto, com icones compactos para modos de lavagem; fotos continuam aparecendo como link Ver foto quando houver `drive_photo_id`.
 ```
+# Atualização 2026-06-22: plataforma multiempresa
+
+O sistema deixou de ser exclusivamente da Beta e passou a ter uma base multiempresa.
+
+## Conceitos que não devem ser confundidos
+
+- **Organização**: o escritório de representação que usa o sistema.
+- **Empresa**: cada empresa representada, como Beta Importadora.
+- Clientes, fornecedores, transportadoras e vendedores são cadastros do escritório.
+- Produtos, estoques, preços, etiquetas, fontes do Drive e mostruário são separados por empresa.
+
+## Regras obrigatórias para novas funcionalidades
+
+1. Nunca criar dados comerciais sem `organization_id`.
+2. Dados específicos de uma representada também precisam de `company_id`.
+3. Toda consulta da interface deve respeitar a empresa selecionada.
+4. Toda tabela exposta pelo Supabase deve ter RLS.
+5. Alterações exigem usuário autenticado e pertencente à organização.
+6. A `service_role` fica somente na Edge Function, nunca no navegador.
+7. A Beta está marcada com `public_read = true` para manter a consulta pública; isso não libera escrita.
+
+## Cadastros disponíveis
+
+- empresas representadas;
+- produtos;
+- clientes;
+- fornecedores;
+- transportadoras;
+- vendedores/representantes.
+
+## Migrações principais
+
+- `20260622160955_multi_company_foundation.sql`: cria a fundação e migra todos os dados existentes para a Beta.
+- `20260622163148_optimize_multi_company_rls.sql`: adiciona índices e otimiza as políticas de acesso.
+
+## Importador
+
+`import-stock` exige login administrativo, recebe `company_id` e carrega somente as fontes daquela empresa. As pastas de preços e etiquetas são configuradas em `companies`; as cinco pastas de estoque ficam em `stock_sources`.
+
+---

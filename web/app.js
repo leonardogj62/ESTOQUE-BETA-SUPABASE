@@ -2,22 +2,14 @@ const CONFIG = {
   supabaseUrl: "https://jqffpijcrzflojahbfyp.supabase.co",
   supabaseAnonKey: "sb_publishable_AdUjgkJxz54MDgLX_b9tfw_yTJVh4I6",
   importFunctionUrl: "https://jqffpijcrzflojahbfyp.supabase.co/functions/v1/import-stock",
-  importFunctionBearer: "COLE_AQUI_UM_TOKEN_SECRETO_OPCIONAL",
-};
-
-const restHeaders = {
-  apikey: CONFIG.supabaseAnonKey,
-  accept: "application/json",
-};
-
-const writeHeaders = {
-  apikey: CONFIG.supabaseAnonKey,
-  authorization: `Bearer ${CONFIG.supabaseAnonKey}`,
-  "content-type": "application/json",
-  prefer: "return=representation",
+  publicAppUrl: "https://leonardogj62.github.io/ESTOQUE-BETA-SUPABASE/web/",
 };
 
 const state = {
+  session: null,
+  companies: [],
+  companyId: localStorage.getItem("estoque_company_id") || "",
+  membership: null,
   rows: [],
   health: [],
   prices: [],
@@ -35,7 +27,119 @@ const state = {
     itemCounts: new Map(),
   },
   selectorSelected: new Set(),
+  registry: {
+    type: "companies",
+    rows: [],
+    query: "",
+    editing: null,
+    companySources: [],
+  },
 };
+
+const REGISTRY_CONFIG = {
+  companies: {
+    title: "Empresas representadas",
+    singular: "empresa",
+    name: "trade_name",
+    order: "trade_name.asc",
+    fields: [
+      ["trade_name", "Nome fantasia", "text", true],
+      ["legal_name", "Razão social", "text"],
+      ["tax_id", "CNPJ / documento", "text"],
+      ["state_registration", "Inscrição estadual", "text"],
+      ["email", "E-mail", "email"],
+      ["phone", "Telefone", "tel"],
+      ["website", "Site", "url"],
+      ...addressFields(),
+      ["price_drive_folder_id", "Pasta de preços no Drive", "text"],
+      ["label_drive_folder_id", "Pasta de etiquetas no Drive", "text"],
+      ["notes", "Observações", "textarea"],
+    ],
+  },
+  products: {
+    title: "Produtos",
+    singular: "produto",
+    name: "display_name",
+    order: "display_name.asc",
+    fields: [
+      ["display_name", "Nome do produto", "text", true],
+      ["reference", "Referência", "text"],
+      ["category", "Categoria", "text"],
+      ["unit", "Unidade", "select", false, [["m", "Metros"], ["kg", "Quilos"], ["un", "Unidades"]]],
+      ["barcode", "Código de barras", "text"],
+      ["ncm", "NCM", "text"],
+      ["description", "Descrição", "textarea"],
+      ["notes", "Observações", "textarea"],
+    ],
+  },
+  customers: {
+    title: "Clientes",
+    singular: "cliente",
+    name: "trade_name",
+    order: "trade_name.asc",
+    fields: partyFields(true),
+  },
+  suppliers: {
+    title: "Fornecedores",
+    singular: "fornecedor",
+    name: "trade_name",
+    order: "trade_name.asc",
+    fields: partyFields(false),
+  },
+  carriers: {
+    title: "Transportadoras",
+    singular: "transportadora",
+    name: "trade_name",
+    order: "trade_name.asc",
+    fields: [
+      ...partyFields(false),
+      ["delivery_regions", "Regiões atendidas", "textarea"],
+    ],
+  },
+  sales_representatives: {
+    title: "Vendedores",
+    singular: "vendedor",
+    name: "full_name",
+    order: "full_name.asc",
+    fields: [
+      ["full_name", "Nome completo", "text", true],
+      ["document", "CPF / documento", "text"],
+      ["email", "E-mail", "email"],
+      ["phone", "Telefone", "tel"],
+      ["commission_percent", "Comissão padrão (%)", "number"],
+      ["territory", "Região / carteira", "text"],
+      ["notes", "Observações", "textarea"],
+    ],
+  },
+};
+
+function partyFields(includeCredit) {
+  const fields = [
+    ["trade_name", "Nome fantasia", "text", true],
+    ["legal_name", "Razão social", "text"],
+    ["tax_id", "CNPJ / documento", "text"],
+    ["state_registration", "Inscrição estadual", "text"],
+    ["contact_name", "Pessoa de contato", "text"],
+    ["email", "E-mail", "email"],
+    ["phone", "Telefone", "tel"],
+    ...addressFields(),
+  ];
+  if (includeCredit) fields.push(["credit_limit", "Limite de crédito", "number"]);
+  fields.push(["notes", "Observações", "textarea"]);
+  return fields;
+}
+
+function addressFields() {
+  return [
+    ["address_postal_code", "CEP", "text"],
+    ["address_street", "Endereço", "text"],
+    ["address_number", "Número", "text"],
+    ["address_complement", "Complemento", "text"],
+    ["address_district", "Bairro", "text"],
+    ["address_city", "Cidade", "text"],
+    ["address_state", "Estado", "text"],
+  ];
+}
 
 const els = {
   status: document.getElementById("status"),
@@ -83,6 +187,26 @@ const els = {
   selectorCount: document.getElementById("selector-count"),
   confirmBtn: document.getElementById("confirm-update-btn"),
   cancelBtn: document.getElementById("cancel-update-btn"),
+  companySelect: document.getElementById("company-select"),
+  accountButton: document.getElementById("account-button"),
+  tabCadastros: document.getElementById("tab-cadastros"),
+  authModal: document.getElementById("auth-modal"),
+  authEmail: document.getElementById("auth-email"),
+  authPassword: document.getElementById("auth-password"),
+  authMessage: document.getElementById("auth-message"),
+  cancelAuthButton: document.getElementById("cancel-auth-button"),
+  signupButton: document.getElementById("signup-button"),
+  loginButton: document.getElementById("login-button"),
+  registryHeading: document.getElementById("registry-heading"),
+  registrySummary: document.getElementById("registry-summary"),
+  registrySearch: document.getElementById("registry-search"),
+  registryResults: document.getElementById("registry-results"),
+  newRegistryButton: document.getElementById("new-registry-button"),
+  registryModal: document.getElementById("registry-modal"),
+  registryModalTitle: document.getElementById("registry-modal-title"),
+  registryForm: document.getElementById("registry-form"),
+  cancelRegistryButton: document.getElementById("cancel-registry-button"),
+  saveRegistryButton: document.getElementById("save-registry-button"),
 };
 
 const configured = !CONFIG.supabaseUrl.startsWith("COLE_AQUI");
@@ -96,8 +220,13 @@ async function boot() {
     return;
   }
 
+  await restoreSession();
+  await loadCompanies();
   bindEvents();
+  renderCompanySwitcher();
+  syncAccessUi();
   await refreshAll();
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function bindEvents() {
@@ -175,6 +304,58 @@ function bindEvents() {
   els.modalSearch.addEventListener("input", () => {
     renderProductSelectorItems(els.modalSearch.value);
   });
+
+  els.companySelect.addEventListener("change", async () => {
+    state.companyId = els.companySelect.value;
+    localStorage.setItem("estoque_company_id", state.companyId);
+    resetResultExpansion();
+    await refreshAll();
+    if (!els.tabCadastros.hidden) await loadRegistry();
+  });
+
+  els.accountButton.addEventListener("click", () => {
+    if (state.session) {
+      if (confirm("Deseja sair do acesso administrativo?")) signOut();
+    } else {
+      openAuthModal();
+    }
+  });
+  els.cancelAuthButton.addEventListener("click", closeAuthModal);
+  els.authModal.addEventListener("click", (event) => {
+    if (event.target === els.authModal) closeAuthModal();
+  });
+  els.loginButton.addEventListener("click", signIn);
+  els.signupButton.addEventListener("click", signUp);
+
+  document.querySelector(".registry-nav").addEventListener("click", async (event) => {
+    const button = event.target.closest(".registry-nav-button");
+    if (!button) return;
+    state.registry.type = button.dataset.registry;
+    state.registry.query = "";
+    els.registrySearch.value = "";
+    document.querySelectorAll(".registry-nav-button").forEach((item) => {
+      item.classList.toggle("active", item === button);
+    });
+    await loadRegistry();
+  });
+  els.registrySearch.addEventListener("input", () => {
+    state.registry.query = els.registrySearch.value.trim();
+    renderRegistry();
+  });
+  els.newRegistryButton.addEventListener("click", () => openRegistryModal());
+  els.cancelRegistryButton.addEventListener("click", closeRegistryModal);
+  els.registryModal.addEventListener("click", (event) => {
+    if (event.target === els.registryModal) closeRegistryModal();
+  });
+  els.saveRegistryButton.addEventListener("click", saveRegistry);
+  els.registryResults.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-registry-action]");
+    if (!button) return;
+    const row = state.registry.rows.find((item) => String(item.id) === button.dataset.id);
+    if (!row) return;
+    if (button.dataset.registryAction === "edit") openRegistryModal(row);
+    if (button.dataset.registryAction === "toggle") await toggleRegistryRow(row);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -185,9 +366,234 @@ function switchTab(tabName) {
   els.tabBusca.hidden = tabName !== "busca";
   els.tabMostruario.hidden = tabName !== "mostruario";
   els.tabPrecos.hidden = tabName !== "precos";
+  els.tabCadastros.hidden = tabName !== "cadastros";
   document.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("active", t.dataset.tab === tabName);
   });
+  if (tabName === "cadastros") loadRegistry();
+}
+
+// ---------------------------------------------------------------------------
+// Acesso e empresa ativa
+// ---------------------------------------------------------------------------
+
+async function restoreSession() {
+  try {
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    if (hash.get("access_token")) {
+      const accessToken = hash.get("access_token");
+      const userRes = await fetch(`${CONFIG.supabaseUrl}/auth/v1/user`, {
+        headers: { apikey: CONFIG.supabaseAnonKey, authorization: `Bearer ${accessToken}` },
+      });
+      const user = userRes.ok ? await userRes.json() : null;
+      const session = {
+        access_token: accessToken,
+        refresh_token: hash.get("refresh_token"),
+        expires_at: Math.floor(Date.now() / 1000) + Number(hash.get("expires_in") || 3600),
+        user,
+      };
+      persistSession(session);
+      history.replaceState(null, "", `${location.pathname}${location.search}`);
+      return;
+    }
+    const stored = JSON.parse(localStorage.getItem("estoque_session") || "null");
+    if (!stored?.access_token) return;
+    const expiresAt = Number(stored.expires_at || 0);
+    if (expiresAt && expiresAt * 1000 < Date.now() + 60000 && stored.refresh_token) {
+      state.session = await refreshSession(stored.refresh_token);
+    } else {
+      state.session = stored;
+    }
+  } catch {
+    localStorage.removeItem("estoque_session");
+  }
+}
+
+async function refreshSession(refreshToken) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: { apikey: CONFIG.supabaseAnonKey, "content-type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!res.ok) {
+    localStorage.removeItem("estoque_session");
+    return null;
+  }
+  const session = await res.json();
+  persistSession(session);
+  return session;
+}
+
+function persistSession(session) {
+  state.session = session;
+  if (session) localStorage.setItem("estoque_session", JSON.stringify(session));
+  else localStorage.removeItem("estoque_session");
+}
+
+function requestHeaders({ write = false, prefer = "" } = {}) {
+  const headers = {
+    apikey: CONFIG.supabaseAnonKey,
+    accept: "application/json",
+  };
+  if (state.session?.access_token) headers.authorization = `Bearer ${state.session.access_token}`;
+  if (write) headers["content-type"] = "application/json";
+  if (prefer) headers.prefer = prefer;
+  return headers;
+}
+
+async function loadCompanies() {
+  try {
+    const companyFields = state.session
+      ? "*"
+      : "id,trade_name,slug,public_read,active";
+    state.companies = await supabaseSelect("companies", `select=${companyFields}&active=eq.true&order=trade_name.asc`);
+    if (state.session) {
+      const memberships = await supabaseSelect(
+        "organization_members",
+        `select=organization_id,role,active&user_id=eq.${encodeURIComponent(sessionUserId())}&active=eq.true`
+      );
+      state.membership = memberships[0] || null;
+    }
+    if (!state.companies.some((company) => company.id === state.companyId)) {
+      state.companyId = state.companies[0]?.id || "";
+      if (state.companyId) localStorage.setItem("estoque_company_id", state.companyId);
+    }
+  } catch (error) {
+    console.error(error);
+    state.companies = [];
+  }
+}
+
+function renderCompanySwitcher() {
+  els.companySelect.innerHTML = state.companies.length
+    ? state.companies.map((company) => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.trade_name)}</option>`).join("")
+    : `<option value="">Nenhuma empresa</option>`;
+  els.companySelect.value = state.companyId;
+}
+
+function currentCompany() {
+  return state.companies.find((company) => company.id === state.companyId) || null;
+}
+
+function currentOrganizationId() {
+  return currentCompany()?.organization_id || state.membership?.organization_id || "";
+}
+
+function sessionUserId() {
+  return state.session?.user?.id || state.session?.user_id || "";
+}
+
+function syncAccessUi() {
+  const signedIn = Boolean(state.session?.access_token && state.membership);
+  const label = state.session?.user?.email || "Sair";
+  els.accountButton.textContent = signedIn ? label : "Entrar";
+  [els.importButton, els.importLabelsButton, els.importPricesButton, els.newPriceButton, els.newUpdateBtn].forEach((button) => {
+    button.disabled = !signedIn;
+    button.title = signedIn ? "" : "Entre para alterar dados";
+  });
+  els.newRegistryButton.disabled = !signedIn;
+  els.registrySummary.textContent = signedIn
+    ? "Cadastros do escritório e da empresa ativa"
+    : "Entre para criar ou alterar cadastros";
+}
+
+function requireSession() {
+  if (state.session?.access_token && state.membership) return true;
+  openAuthModal();
+  return false;
+}
+
+function openAuthModal() {
+  els.authMessage.textContent = "";
+  els.authPassword.value = "";
+  els.authModal.hidden = false;
+  els.authEmail.focus();
+}
+
+function closeAuthModal() {
+  els.authModal.hidden = true;
+}
+
+async function authRequest(path, body) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/auth/v1/${path}`, {
+    method: "POST",
+    headers: { apikey: CONFIG.supabaseAnonKey, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.msg || payload.message || payload.error_description || "Não foi possível concluir o acesso.");
+  return payload;
+}
+
+async function signIn() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) {
+    els.authMessage.textContent = "Informe o e-mail e a senha.";
+    return;
+  }
+  els.loginButton.disabled = true;
+  els.authMessage.textContent = "Entrando...";
+  try {
+    const session = await authRequest("token?grant_type=password", { email, password });
+    persistSession(session);
+    await loadCompanies();
+    renderCompanySwitcher();
+    syncAccessUi();
+    closeAuthModal();
+    await refreshAll();
+  } catch (error) {
+    els.authMessage.textContent = readableError(error);
+  } finally {
+    els.loginButton.disabled = false;
+  }
+}
+
+async function signUp() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || password.length < 6) {
+    els.authMessage.textContent = "Informe um e-mail e uma senha com pelo menos 6 caracteres.";
+    return;
+  }
+  els.signupButton.disabled = true;
+  els.authMessage.textContent = "Criando acesso...";
+  try {
+    const redirectTo = location.protocol.startsWith("http")
+      ? `${location.origin}${location.pathname}`
+      : CONFIG.publicAppUrl;
+    const result = await authRequest(`signup?redirect_to=${encodeURIComponent(redirectTo)}`, { email, password });
+    if (result.access_token) {
+      persistSession(result);
+      await loadCompanies();
+      renderCompanySwitcher();
+      syncAccessUi();
+      closeAuthModal();
+      await refreshAll();
+    } else {
+      els.authMessage.textContent = "Acesso criado. Confirme o e-mail recebido e depois clique em Entrar.";
+    }
+  } catch (error) {
+    els.authMessage.textContent = readableError(error);
+  } finally {
+    els.signupButton.disabled = false;
+  }
+}
+
+async function signOut() {
+  if (state.session?.access_token) {
+    await fetch(`${CONFIG.supabaseUrl}/auth/v1/logout`, {
+      method: "POST",
+      headers: requestHeaders(),
+    }).catch(() => {});
+  }
+  persistSession(null);
+  state.membership = null;
+  await loadCompanies();
+  renderCompanySwitcher();
+  syncAccessUi();
+  switchTab("busca");
+  await refreshAll();
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +601,10 @@ function switchTab(tabName) {
 // ---------------------------------------------------------------------------
 
 async function refreshAll() {
+  if (!state.companyId) {
+    els.status.textContent = "Cadastre ou selecione uma empresa";
+    return;
+  }
   els.status.textContent = "Carregando dados...";
   const [health, stock, prices, labels] = await Promise.all([loadHealth(), loadStock(), loadPrices(), loadLabels()]);
   state.health = health;
@@ -211,7 +621,7 @@ async function refreshAll() {
 
 async function loadHealth() {
   try {
-    return await supabaseSelect("v_source_health", "select=*");
+    return await supabaseSelect("v_source_health", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}`);
   } catch (error) {
     els.status.textContent = "Erro ao carregar saúde dos estoques";
     console.error(error);
@@ -221,7 +631,7 @@ async function loadHealth() {
 
 async function loadStock() {
   try {
-    return await supabaseSelectAll("v_stock_search", "select=*&order=product_name.asc");
+    return await supabaseSelectAll("v_stock_search", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=product_name.asc`);
   } catch (error) {
     els.status.textContent = "Erro ao carregar busca";
     console.error(error);
@@ -231,7 +641,7 @@ async function loadStock() {
 
 async function loadPrices() {
   try {
-    return await supabaseSelectAll("price_items", "select=*&order=display_name.asc,updated_at.desc");
+    return await supabaseSelectAll("price_items", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc,updated_at.desc`);
   } catch (error) {
     console.error(error);
     return [];
@@ -240,7 +650,7 @@ async function loadPrices() {
 
 async function loadLabels() {
   try {
-    return await supabaseSelectAll("product_labels", "select=*&order=display_name.asc");
+    return await supabaseSelectAll("product_labels", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc`);
   } catch (error) {
     console.error(error);
     return [];
@@ -252,6 +662,7 @@ async function loadLabels() {
 // ---------------------------------------------------------------------------
 
 async function runImport() {
+  if (!requireSession()) return;
   if (CONFIG.importFunctionUrl.startsWith("COLE_AQUI")) {
     alert("Configure importFunctionUrl em web/app.js antes de importar.");
     return;
@@ -262,10 +673,7 @@ async function runImport() {
   els.status.textContent = "Importando arquivos do Drive...";
 
   try {
-    const headers = { ...restHeaders, "content-type": "application/json" };
-    if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
-      headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
-    }
+    const headers = requestHeaders({ write: true });
 
     const sources = state.health.length ? state.health : [{ slug: "todos", label: "Todos os estoques" }];
     const failures = [];
@@ -275,7 +683,7 @@ async function runImport() {
       const res = await fetch(CONFIG.importFunctionUrl, {
         method: "POST",
         headers,
-        body: JSON.stringify({ source_slug: source.slug }),
+        body: JSON.stringify({ source_slug: source.slug, company_id: state.companyId }),
       });
       const payload = await res.json();
       if (!res.ok || payload.ok === false) {
@@ -295,6 +703,7 @@ async function runImport() {
 }
 
 async function runPriceImport() {
+  if (!requireSession()) return;
   if (CONFIG.importFunctionUrl.startsWith("COLE_AQUI")) {
     alert("Configure importFunctionUrl em web/app.js antes de importar.");
     return;
@@ -305,15 +714,12 @@ async function runPriceImport() {
   els.status.textContent = "Importando tabela de preços...";
 
   try {
-    const headers = { ...restHeaders, "content-type": "application/json" };
-    if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
-      headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
-    }
+    const headers = requestHeaders({ write: true });
 
     const res = await fetch(CONFIG.importFunctionUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ action: "import_prices" }),
+      body: JSON.stringify({ action: "import_prices", company_id: state.companyId }),
     });
     const payload = await res.json();
     if (!res.ok || payload.ok === false) {
@@ -333,6 +739,7 @@ async function runPriceImport() {
 }
 
 async function runLabelImport() {
+  if (!requireSession()) return;
   if (CONFIG.importFunctionUrl.startsWith("COLE_AQUI")) {
     alert("Configure importFunctionUrl em web/app.js antes de importar.");
     return;
@@ -343,15 +750,12 @@ async function runLabelImport() {
   els.status.textContent = "Importando etiquetas...";
 
   try {
-    const headers = { ...restHeaders, "content-type": "application/json" };
-    if (!CONFIG.importFunctionBearer.startsWith("COLE_AQUI")) {
-      headers.authorization = `Bearer ${CONFIG.importFunctionBearer}`;
-    }
+    const headers = requestHeaders({ write: true });
 
     const res = await fetch(CONFIG.importFunctionUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ action: "import_labels" }),
+      body: JSON.stringify({ action: "import_labels", company_id: state.companyId }),
     });
     const payload = await res.json();
     if (!res.ok || payload.ok === false) {
@@ -374,7 +778,7 @@ async function runLabelImport() {
 // ---------------------------------------------------------------------------
 
 async function supabaseSelect(resource, query, range = null) {
-  const headers = { ...restHeaders };
+  const headers = requestHeaders();
   if (range) headers.range = `${range.from}-${range.to}`;
 
   const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, { headers });
@@ -403,7 +807,7 @@ async function supabaseSelectAll(resource, query) {
 async function supabaseInsert(resource, body) {
   const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}`, {
     method: "POST",
-    headers: writeHeaders,
+    headers: requestHeaders({ write: true, prefer: "return=representation" }),
     body: JSON.stringify(body),
   });
   const payload = await res.json();
@@ -414,12 +818,34 @@ async function supabaseInsert(resource, body) {
 async function supabaseDelete(resource, query) {
   const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, {
     method: "DELETE",
-    headers: writeHeaders,
+    headers: requestHeaders({ write: true }),
   });
   if (!res.ok) {
     const payload = await res.json();
     throw new Error(payload.message || "Exclusão no Supabase falhou");
   }
+}
+
+async function supabaseUpdate(resource, query, body) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?${query}`, {
+    method: "PATCH",
+    headers: requestHeaders({ write: true, prefer: "return=representation" }),
+    body: JSON.stringify(body),
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.message || "Atualização no Supabase falhou");
+  return payload;
+}
+
+async function supabaseUpsert(resource, conflict, body) {
+  const res = await fetch(`${CONFIG.supabaseUrl}/rest/v1/${resource}?on_conflict=${encodeURIComponent(conflict)}`, {
+    method: "POST",
+    headers: requestHeaders({ write: true, prefer: "resolution=merge-duplicates,return=representation" }),
+    body: JSON.stringify(body),
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.message || "Gravação no Supabase falhou");
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +1270,7 @@ function readCommissionPrices(price) {
 }
 
 function openPriceModal() {
+  if (!requireSession()) return;
   els.manualPriceProduct.value = "";
   els.manualPriceUnit.value = "m";
   els.manualPriceCurrency.value = "BRL";
@@ -880,11 +1307,13 @@ async function saveManualPrice() {
     const normalized = normalize(product);
     await supabaseDelete(
       "price_items",
-      `source_type=eq.manual&normalized_name=eq.${encodeURIComponent(normalized)}&currency=eq.${encodeURIComponent(currency)}`
+      `company_id=eq.${encodeURIComponent(state.companyId)}&source_type=eq.manual&normalized_name=eq.${encodeURIComponent(normalized)}&currency=eq.${encodeURIComponent(currency)}`
     );
 
     const values = Object.values(commissions);
     await supabaseInsert("price_items", {
+      organization_id: currentOrganizationId(),
+      company_id: state.companyId,
       normalized_name: normalized,
       display_name: product,
       unit: els.manualPriceUnit.value,
@@ -962,11 +1391,11 @@ async function loadAndRenderShowroom() {
   try {
     const updates = await supabaseSelect(
       "showroom_updates",
-      "select=id,updated_at,note&order=updated_at.desc"
+      `select=id,updated_at,note&company_id=eq.${encodeURIComponent(state.companyId)}&order=updated_at.desc`
     );
     const itemRows = await supabaseSelectAll(
       "showroom_update_items",
-      "select=update_id,product_name"
+      `select=update_id,product_name&company_id=eq.${encodeURIComponent(state.companyId)}`
     );
     state.showroom.updates = updates;
     state.showroom.itemCounts = summarizeShowroomItemCounts(itemRows);
@@ -1063,7 +1492,7 @@ async function getShowroomDiff(updateId) {
 
   const previousItems = await supabaseSelectAll(
     "showroom_update_items",
-    `update_id=lt.${updateId}&select=*&order=update_id.desc,id.desc`
+    `update_id=lt.${updateId}&company_id=eq.${encodeURIComponent(state.companyId)}&select=*&order=update_id.desc,id.desc`
   );
 
   const prevMap = new Map();
@@ -1181,6 +1610,7 @@ function renderDiffTable(items, title, collapsed = false) {
 // ---------------------------------------------------------------------------
 
 function openProductSelector() {
+  if (!requireSession()) return;
   if (!state.rows.length) {
     alert("Os dados de estoque ainda não foram carregados. Aguarde ou clique em Atualizar.");
     return;
@@ -1306,11 +1736,20 @@ async function saveShowroomUpdate() {
     }
 
     // Cria o registro pai em showroom_updates
-    const [update] = await supabaseInsert("showroom_updates", { note: null });
+    const [update] = await supabaseInsert("showroom_updates", {
+      organization_id: currentOrganizationId(),
+      company_id: state.companyId,
+      note: null,
+    });
 
     // Insere os itens em lotes de 500
     for (let i = 0; i < items.length; i += 500) {
-      const batch = items.slice(i, i + 500).map((item) => ({ ...item, update_id: update.id }));
+      const batch = items.slice(i, i + 500).map((item) => ({
+        ...item,
+        organization_id: currentOrganizationId(),
+        company_id: state.companyId,
+        update_id: update.id,
+      }));
       await supabaseInsert("showroom_update_items", batch);
     }
 
@@ -1324,6 +1763,247 @@ async function saveShowroomUpdate() {
     els.confirmBtn.disabled = false;
     els.confirmBtn.textContent = "Confirmar";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cadastros administrativos
+// ---------------------------------------------------------------------------
+
+async function loadRegistry() {
+  const type = state.registry.type;
+  const config = REGISTRY_CONFIG[type];
+  els.registryHeading.textContent = config.title;
+  els.registryResults.innerHTML = `<p class="showroom-loading">Carregando...</p>`;
+
+  try {
+    if (type === "companies") {
+      state.registry.rows = state.session && currentOrganizationId()
+        ? await supabaseSelectAll("companies", `select=*&organization_id=eq.${encodeURIComponent(currentOrganizationId())}&order=${config.order}`)
+        : state.companies;
+    } else if (type === "products") {
+      state.registry.rows = await supabaseSelectAll(
+        "products",
+        `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=${config.order}`
+      );
+    } else if (state.session && currentOrganizationId()) {
+      state.registry.rows = await supabaseSelectAll(
+        type,
+        `select=*&organization_id=eq.${encodeURIComponent(currentOrganizationId())}&order=${config.order}`
+      );
+    } else {
+      state.registry.rows = [];
+    }
+    renderRegistry();
+  } catch (error) {
+    els.registryResults.innerHTML = `<div class="empty"><strong>Não foi possível carregar</strong><p>${escapeHtml(readableError(error))}</p></div>`;
+  }
+}
+
+function renderRegistry() {
+  const config = REGISTRY_CONFIG[state.registry.type];
+  const q = normalize(state.registry.query);
+  const rows = state.registry.rows.filter((row) => {
+    const values = [row[config.name], row.legal_name, row.reference, row.tax_id, row.email, row.phone, row.category];
+    return !q || values.some((value) => normalize(value || "").includes(q));
+  });
+
+  els.registrySummary.textContent = state.session
+    ? `${rows.length} registro(s) · ${currentCompany()?.trade_name || "empresa ativa"}`
+    : `${rows.length} registro(s) · entre para alterar`;
+
+  if (!rows.length) {
+    els.registryResults.innerHTML = `<div class="empty"><strong>Nenhum ${escapeHtml(config.singular)} cadastrado</strong><p>${state.session ? "Use Novo cadastro para começar." : "Entre no acesso administrativo para consultar esta área."}</p></div>`;
+    return;
+  }
+
+  els.registryResults.innerHTML = rows.map((row) => {
+    const name = row[config.name] || "Sem nome";
+    const meta = registryMeta(row);
+    const contact = [row.contact_name, row.email, row.phone].filter(Boolean).join(" · ");
+    return `
+      <div class="registry-row">
+        <div>
+          <div class="registry-name">${escapeHtml(name)}</div>
+          ${meta ? `<div class="registry-meta">${escapeHtml(meta)}</div>` : ""}
+          <span class="status-label ${row.active === false ? "inactive" : ""}">${row.active === false ? "Inativo" : "Ativo"}</span>
+        </div>
+        <div class="registry-contact">${escapeHtml(contact || row.website || row.delivery_regions || "")}</div>
+        <div class="registry-actions">
+          <button data-registry-action="edit" data-id="${escapeHtml(row.id)}" type="button" ${state.session ? "" : "disabled"}>Editar</button>
+          <button data-registry-action="toggle" data-id="${escapeHtml(row.id)}" type="button" ${state.session ? "" : "disabled"}>${row.active === false ? "Ativar" : "Inativar"}</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function registryMeta(row) {
+  if (state.registry.type === "products") {
+    return [row.reference && `Ref. ${row.reference}`, row.category, row.unit].filter(Boolean).join(" · ");
+  }
+  if (state.registry.type === "sales_representatives") {
+    return [row.territory, row.commission_percent != null && `${row.commission_percent}%`].filter(Boolean).join(" · ");
+  }
+  return [row.legal_name, row.tax_id].filter(Boolean).join(" · ");
+}
+
+async function openRegistryModal(row = null) {
+  if (!requireSession()) return;
+  const type = state.registry.type;
+  const config = REGISTRY_CONFIG[type];
+  state.registry.editing = row;
+  state.registry.companySources = [];
+  if (type === "companies" && row) {
+    state.registry.companySources = await supabaseSelectAll(
+      "stock_sources",
+      `select=slug,drive_folder_id&company_id=eq.${encodeURIComponent(row.id)}`
+    );
+  }
+  els.registryModalTitle.textContent = row ? `Editar ${config.singular}` : `Novo ${config.singular}`;
+  els.registryForm.innerHTML = config.fields.map((field) => renderRegistryField(field, row || {})).join("")
+    + (type === "companies" ? renderCompanySourceFields() : "")
+    + `<label class="form-check"><input name="active" type="checkbox" ${(row?.active ?? true) ? "checked" : ""}> Cadastro ativo</label>`
+    + (type === "companies" ? `<label class="form-check"><input name="public_read" type="checkbox" ${row?.public_read ? "checked" : ""}> Permitir consulta pública desta empresa</label>` : "");
+  els.registryModal.hidden = false;
+  els.registryForm.querySelector("input, select, textarea")?.focus();
+}
+
+function renderRegistryField(field, row) {
+  const [name, label, type, required, options] = field;
+  const value = name.startsWith("address_")
+    ? row.address?.[name.replace("address_", "")] ?? ""
+    : row[name] ?? "";
+  if (type === "textarea") {
+    return `<label class="form-field"><span>${escapeHtml(label)}</span><textarea name="${escapeHtml(name)}" rows="3" ${required ? "required" : ""}>${escapeHtml(value)}</textarea></label>`;
+  }
+  if (type === "select") {
+    return `<label class="form-field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(name)}">${options.map(([optionValue, optionLabel]) => `<option value="${escapeHtml(optionValue)}" ${optionValue === value ? "selected" : ""}>${escapeHtml(optionLabel)}</option>`).join("")}</select></label>`;
+  }
+  return `<label class="form-field"><span>${escapeHtml(label)}</span><input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" ${required ? "required" : ""} ${type === "number" ? "step=\"0.01\"" : ""}></label>`;
+}
+
+function renderCompanySourceFields() {
+  const sources = [
+    ["masc-pronta-entrega", "Estoque masculino · pronta entrega"],
+    ["masc-programacao", "Estoque masculino · programação"],
+    ["fem-pronta-entrega", "Estoque feminino · pronta entrega"],
+    ["fem-programacao", "Estoque feminino · programação"],
+    ["fem-promocao", "Estoque feminino · promoção"],
+  ];
+  return `<div class="form-section-title">Pastas de estoque no Google Drive</div>${sources.map(([slug, label]) => {
+    const value = state.registry.companySources.find((source) => source.slug === slug)?.drive_folder_id || "";
+    return `<label class="form-field"><span>${escapeHtml(label)}</span><input name="source_${escapeHtml(slug)}" value="${escapeHtml(value)}" placeholder="ID da pasta"></label>`;
+  }).join("")}`;
+}
+
+function closeRegistryModal() {
+  els.registryModal.hidden = true;
+  state.registry.editing = null;
+}
+
+async function saveRegistry() {
+  if (!requireSession()) return;
+  const type = state.registry.type;
+  const config = REGISTRY_CONFIG[type];
+  const form = new FormData(els.registryForm);
+  const requiredField = config.fields.find((field) => field[3]);
+  if (requiredField && !String(form.get(requiredField[0]) || "").trim()) {
+    alert(`Informe ${requiredField[1].toLowerCase()}.`);
+    return;
+  }
+
+  const payload = {};
+  for (const [name, , fieldType] of config.fields) {
+    const raw = String(form.get(name) || "").trim();
+    if (name.startsWith("address_")) continue;
+    payload[name] = fieldType === "number" ? (raw ? Number(raw) : null) : (raw || null);
+  }
+  if (config.fields.some((field) => field[0].startsWith("address_"))) {
+    payload.address = Object.fromEntries(addressFields().map(([name]) => [
+      name.replace("address_", ""),
+      String(form.get(name) || "").trim(),
+    ]).filter(([, value]) => value));
+  }
+  payload.active = form.get("active") === "on";
+
+  if (type === "companies") {
+    payload.organization_id = currentOrganizationId();
+    payload.slug = slugify(payload.trade_name);
+    payload.public_read = form.get("public_read") === "on";
+  } else if (type === "products") {
+    payload.organization_id = currentOrganizationId();
+    payload.company_id = state.companyId;
+    payload.normalized_name = normalize(payload.display_name);
+  } else {
+    payload.organization_id = currentOrganizationId();
+  }
+
+  els.saveRegistryButton.disabled = true;
+  els.saveRegistryButton.textContent = "Salvando...";
+  try {
+    let saved;
+    if (state.registry.editing) {
+      [saved] = await supabaseUpdate(type, `id=eq.${encodeURIComponent(state.registry.editing.id)}`, payload);
+    } else {
+      [saved] = await supabaseInsert(type, payload);
+    }
+    if (type === "companies") {
+      await saveCompanySources(saved.id, saved.organization_id, form);
+      await loadCompanies();
+      renderCompanySwitcher();
+    }
+    closeRegistryModal();
+    await loadRegistry();
+    if (type === "products") await refreshAll();
+  } catch (error) {
+    alert(`Erro ao salvar ${config.singular}: ${readableError(error)}`);
+  } finally {
+    els.saveRegistryButton.disabled = false;
+    els.saveRegistryButton.textContent = "Salvar";
+  }
+}
+
+async function saveCompanySources(companyId, organizationId, form) {
+  const definitions = [
+    ["masc-pronta-entrega", "Masc. Pronta Entrega", "masc", "pronta_entrega"],
+    ["masc-programacao", "Masc. Programação", "masc", "programacao"],
+    ["fem-pronta-entrega", "Fem. Pronta Entrega", "fem", "pronta_entrega"],
+    ["fem-programacao", "Fem. Programação", "fem", "programacao"],
+    ["fem-promocao", "Fem. Promoção", "fem", "promocao"],
+  ];
+  const rows = definitions.map(([slug, label, category, availability]) => ({
+    organization_id: organizationId,
+    company_id: companyId,
+    slug,
+    label,
+    category,
+    availability,
+    drive_folder_id: String(form.get(`source_${slug}`) || "").trim() || "nao-configurada",
+    active: Boolean(String(form.get(`source_${slug}`) || "").trim()),
+  }));
+  await supabaseUpsert("stock_sources", "company_id,slug", rows);
+}
+
+async function toggleRegistryRow(row) {
+  if (!requireSession()) return;
+  try {
+    await supabaseUpdate(state.registry.type, `id=eq.${encodeURIComponent(row.id)}`, { active: row.active === false });
+    await loadRegistry();
+    if (state.registry.type === "companies") {
+      await loadCompanies();
+      renderCompanySwitcher();
+    }
+  } catch (error) {
+    alert("Não foi possível alterar o cadastro: " + readableError(error));
+  }
+}
+
+function slugify(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 // ---------------------------------------------------------------------------

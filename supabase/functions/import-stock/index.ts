@@ -4,9 +4,20 @@ import * as pdfjs from "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs?t
 
 type Source = {
   id: string;
+  organization_id: string;
+  company_id: string;
   slug: string;
   label: string;
   drive_folder_id: string;
+};
+
+type Company = {
+  id: string;
+  organization_id: string;
+  trade_name: string;
+  slug: string;
+  price_drive_folder_id: string | null;
+  label_drive_folder_id: string | null;
 };
 
 type ParsedItem = {
@@ -37,11 +48,9 @@ const SUPABASE_SERVICE_ROLE_KEY = getSupabaseSecretKey();
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
-const DEFAULT_PRICE_DRIVE_FOLDER_ID = "1TLFeg3czJkesCOwFl7qMnTUB2B14xLKO";
-const DEFAULT_LABEL_DRIVE_FOLDER_ID = "11msFrrRee3JfCMrl_-Ys64-UyYeV3LOt";
 const PRICE_DRIVE_FILE_ID = Deno.env.get("PRICE_DRIVE_FILE_ID") || "";
-const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || DEFAULT_PRICE_DRIVE_FOLDER_ID;
-const LABEL_DRIVE_FOLDER_ID = Deno.env.get("LABEL_DRIVE_FOLDER_ID") || DEFAULT_LABEL_DRIVE_FOLDER_ID;
+const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || "";
+const LABEL_DRIVE_FOLDER_ID = Deno.env.get("LABEL_DRIVE_FOLDER_ID") || "";
 
 let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
@@ -85,9 +94,19 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: messageOf(error) }, 500);
   }
 
+  const access = await authorizeRequest(req, params.company_id);
+  if (!access.ok) {
+    return json({ ok: false, error: access.error }, access.status);
+  }
+  const company = access.company;
+
   const run = await supabase
     .from("import_runs")
-    .insert({ status: "running" })
+    .insert({
+      status: "running",
+      organization_id: company.organization_id,
+      company_id: company.id,
+    })
     .select("id")
     .single();
 
@@ -102,7 +121,7 @@ Deno.serve(async (req) => {
     const token = await getGoogleAccessToken();
 
     if (params.action === "import_prices" || params.import_prices === true) {
-      const priceResult = await importPrices(token);
+      const priceResult = await importPrices(company, token);
       summary.push(priceResult);
 
       await supabase
@@ -118,7 +137,7 @@ Deno.serve(async (req) => {
     }
 
     if (params.action === "import_labels" || params.import_labels === true) {
-      const labelResult = await importLabels(token);
+      const labelResult = await importLabels(company, token);
       summary.push(labelResult);
 
       await supabase
@@ -135,7 +154,8 @@ Deno.serve(async (req) => {
 
     let sourceQuery = supabase
       .from("stock_sources")
-      .select("id, slug, label, drive_folder_id")
+      .select("id, organization_id, company_id, slug, label, drive_folder_id")
+      .eq("company_id", company.id)
       .eq("active", true)
       .order("label");
 
@@ -176,6 +196,48 @@ Deno.serve(async (req) => {
     return json({ ok: false, run_id: runId, error: messageOf(error), summary }, 500);
   }
 });
+
+async function authorizeRequest(req: Request, requestedCompanyId: unknown): Promise<
+  | { ok: true; company: Company }
+  | { ok: false; status: number; error: string }
+> {
+  const authorization = req.headers.get("authorization") || "";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return { ok: false, status: 401, error: "Entre no sistema para importar arquivos." };
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user) {
+    return { ok: false, status: 401, error: "Sessao invalida ou expirada. Entre novamente." };
+  }
+
+  let companyQuery = supabase
+    .from("companies")
+    .select("id, organization_id, trade_name, slug, price_drive_folder_id, label_drive_folder_id")
+    .eq("active", true);
+
+  if (typeof requestedCompanyId === "string" && requestedCompanyId) {
+    companyQuery = companyQuery.eq("id", requestedCompanyId);
+  } else {
+    companyQuery = companyQuery.eq("slug", "beta-importadora");
+  }
+
+  const { data: company, error: companyError } = await companyQuery.maybeSingle();
+  if (companyError || !company) return { ok: false, status: 404, error: "Empresa nao encontrada." };
+
+  const { data: member, error: memberError } = await supabase
+    .from("organization_members")
+    .select("role")
+    .eq("organization_id", company.organization_id)
+    .eq("user_id", userData.user.id)
+    .eq("active", true)
+    .maybeSingle();
+
+  if (memberError || !member || !["owner", "admin", "manager"].includes(member.role)) {
+    return { ok: false, status: 403, error: "Seu usuario nao tem permissao para importar esta empresa." };
+  }
+
+  return { ok: true, company: company as Company };
+}
 
 function createSupabaseAdminClient() {
   if (!SUPABASE_URL) {
@@ -323,16 +385,16 @@ async function getDriveFileById(fileId: string, token: string) {
   return await res.json() as DriveFile;
 }
 
-async function getLatestPriceDriveFile(token: string) {
-  if (PRICE_DRIVE_FILE_ID) {
+async function getLatestPriceDriveFile(company: Company, folderId: string, token: string) {
+  if (company.slug === "beta-importadora" && PRICE_DRIVE_FILE_ID) {
     return await getDriveFileById(PRICE_DRIVE_FILE_ID, token);
   }
 
-  if (!PRICE_DRIVE_FOLDER_ID) {
+  if (!folderId) {
     throw new Error("Configure PRICE_DRIVE_FILE_ID ou PRICE_DRIVE_FOLDER_ID nos Secrets para importar tabela de preços.");
   }
 
-  const q = `'${PRICE_DRIVE_FOLDER_ID}' in parents and trashed=false`;
+  const q = `'${folderId}' in parents and trashed=false`;
   const url =
     "https://www.googleapis.com/drive/v3/files?" +
     new URLSearchParams({
@@ -361,11 +423,12 @@ async function downloadDriveFile(file: any, token: string) {
   return await res.arrayBuffer();
 }
 
-async function importPrices(token: string) {
+async function importPrices(company: Company, token: string) {
   try {
-    const file = await getLatestPriceDriveFile(token);
+    const folderId = company.price_drive_folder_id || (company.slug === "beta-importadora" ? PRICE_DRIVE_FOLDER_ID : "");
+    const file = await getLatestPriceDriveFile(company, folderId, token);
     if (!file) {
-      await recordPriceFile(null, "failed", "Nenhuma planilha de preços encontrada", []);
+      await recordPriceFile(company, null, "failed", "Nenhuma planilha de preços encontrada", []);
       return { source: "Tabela de preços", status: "failed", error: "Nenhuma planilha de preços encontrada" };
     }
 
@@ -375,12 +438,13 @@ async function importPrices(token: string) {
 
     const bytes = await downloadDriveFile(file, token);
     const items = parsePriceSpreadsheet(bytes);
-    const fileRow = await recordPriceFile(file, items.length ? "imported" : "failed", items.length ? null : "Nenhum preço foi extraído", items);
+    const fileRow = await recordPriceFile(company, file, items.length ? "imported" : "failed", items.length ? null : "Nenhum preço foi extraído", items);
 
     if (items.length) {
-      const { error: deleteError } = await supabase.from("price_items").delete().eq("source_type", "drive");
+      const { error: deleteError } = await supabase.from("price_items").delete()
+        .eq("company_id", company.id).eq("source_type", "drive");
       if (deleteError) throw deleteError;
-      await insertPriceItems(fileRow.id, items);
+      await insertPriceItems(company, fileRow.id, items);
     }
 
     return {
@@ -390,22 +454,28 @@ async function importPrices(token: string) {
       items: items.length,
     };
   } catch (error) {
-    await recordPriceFile(null, "failed", messageOf(error), []);
+    await recordPriceFile(company, null, "failed", messageOf(error), []);
     return { source: "Tabela de preços", status: "failed", error: messageOf(error) };
   }
 }
 
-async function importLabels(token: string) {
+async function importLabels(company: Company, token: string) {
   try {
-    if (!LABEL_DRIVE_FOLDER_ID) {
+    const folderId = company.label_drive_folder_id || (company.slug === "beta-importadora" ? LABEL_DRIVE_FOLDER_ID : "");
+    if (!folderId) {
       throw new Error("Configure LABEL_DRIVE_FOLDER_ID nos Secrets para importar etiquetas.");
     }
 
-    const files = await listDriveFilesRecursive(LABEL_DRIVE_FOLDER_ID, token);
+    const files = await listDriveFilesRecursive(folderId, token);
     const labels = files
       .filter(isImageFile)
       .map(parseLabelFile)
-      .filter(Boolean) as Record<string, unknown>[];
+      .filter((label): label is NonNullable<ReturnType<typeof parseLabelFile>> => Boolean(label))
+      .map((label) => ({
+        ...label,
+        organization_id: company.organization_id,
+        company_id: company.id,
+      })) as Record<string, unknown>[];
 
     if (!labels.length) {
       return { source: "Etiquetas", status: "failed", error: "Nenhuma etiqueta reconhecida na pasta" };
@@ -414,6 +484,7 @@ async function importLabels(token: string) {
     const { error: deleteError } = await supabase
       .from("product_labels")
       .delete()
+      .eq("company_id", company.id)
       .not("drive_photo_id", "is", null);
     if (deleteError) throw deleteError;
 
@@ -429,12 +500,15 @@ async function importLabels(token: string) {
 }
 
 async function recordPriceFile(
+  company: Company,
   file: DriveFile | null,
   status: "imported" | "failed",
   errorMessage: string | null,
   items: ParsedPriceItem[],
 ) {
   const payload = {
+    organization_id: company.organization_id,
+    company_id: company.id,
     drive_file_id: file?.id || `missing-price-${Date.now()}`,
     file_name: file?.name || "Tabela de preços não encontrada",
     imported_at: new Date().toISOString(),
@@ -453,10 +527,12 @@ async function recordPriceFile(
   return data;
 }
 
-async function insertPriceItems(priceFileId: string, items: ParsedPriceItem[]) {
+async function insertPriceItems(company: Company, priceFileId: string, items: ParsedPriceItem[]) {
   const rows = items.map((item) => {
     const values = Object.values(item.commissionPrices);
     return {
+      organization_id: company.organization_id,
+      company_id: company.id,
       price_file_id: priceFileId,
       normalized_name: normalizeText(item.product),
       display_name: item.product,
@@ -490,6 +566,8 @@ async function recordStockFile(
 ) {
   const productCount = unique(items.map((i) => normalizeText(i.product))).length;
   const payload = {
+    organization_id: source.organization_id,
+    company_id: source.company_id,
     source_id: source.id,
     drive_file_id: file?.id || `missing-${Date.now()}-${source.slug}`,
     file_name: file?.name || "Nenhum arquivo encontrado",
@@ -516,22 +594,32 @@ async function recordStockFile(
 async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) {
   const productRows = unique(items.map((i) => normalizeText(i.product))).map((normalized) => {
     const display = items.find((i) => normalizeText(i.product) === normalized)?.product || normalized;
-    return { normalized_name: normalized, display_name: display, updated_at: new Date().toISOString() };
+    return {
+      organization_id: source.organization_id,
+      company_id: source.company_id,
+      normalized_name: normalized,
+      display_name: display,
+      unit: unitForProduct(display),
+      updated_at: new Date().toISOString(),
+    };
   });
 
   const { error: productError } = await supabase
     .from("products")
-    .upsert(productRows, { onConflict: "normalized_name" });
+    .upsert(productRows, { onConflict: "company_id,normalized_name" });
   if (productError) throw productError;
 
   const { data: products, error: loadError } = await supabase
     .from("products")
     .select("id, normalized_name")
+    .eq("company_id", source.company_id)
     .in("normalized_name", productRows.map((p) => p.normalized_name));
   if (loadError) throw loadError;
 
   const productByName = new Map((products || []).map((p: any) => [p.normalized_name, p.id]));
   const rows = items.map((item) => ({
+    organization_id: source.organization_id,
+    company_id: source.company_id,
     file_id: fileId,
     source_id: source.id,
     product_id: productByName.get(normalizeText(item.product)),
