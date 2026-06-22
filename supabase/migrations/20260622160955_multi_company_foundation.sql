@@ -69,7 +69,7 @@ create table if not exists public.companies (
 );
 
 insert into public.organizations (name, slug, email)
-values ('Escritorio de Representacao', 'escritorio-principal', 'leonardogarciajeronimo@gmail.com')
+values ('Escritorio de Representacao', 'escritorio-principal', 'leonardogarciajj@gmail.com')
 on conflict (slug) do nothing;
 
 insert into public.companies (
@@ -85,7 +85,7 @@ on conflict (organization_id, slug) do update set
   label_drive_folder_id = excluded.label_drive_folder_id;
 
 insert into public.organization_invitations (organization_id, email, role)
-select id, 'leonardogarciajeronimo@gmail.com', 'owner'
+select id, 'leonardogarciajj@gmail.com', 'owner'
 from public.organizations where slug = 'escritorio-principal'
 on conflict do nothing;
 
