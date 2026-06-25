@@ -658,22 +658,13 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[], 
     };
   });
 
-  for (let i = 0; i < productRows.length; i += 500) {
-    const { error: productError } = await supabase
-      .from("products")
-      .upsert(productRows.slice(i, i + 500), { onConflict: "company_id,normalized_name" });
-    if (productError) throw productError;
-  }
-
   const products: { id: string; normalized_name: string }[] = [];
-  const productNames = productRows.map((p) => p.normalized_name);
-  for (let i = 0; i < productNames.length; i += 300) {
-    const { data, error: loadError } = await supabase
+  for (let i = 0; i < productRows.length; i += 500) {
+    const { data, error: productError } = await supabase
       .from("products")
-      .select("id, normalized_name")
-      .eq("company_id", source.company_id)
-      .in("normalized_name", productNames.slice(i, i + 300));
-    if (loadError) throw loadError;
+      .upsert(productRows.slice(i, i + 500), { onConflict: "company_id,normalized_name" })
+      .select("id, normalized_name");
+    if (productError) throw productError;
     products.push(...((data || []) as { id: string; normalized_name: string }[]));
   }
 
@@ -695,8 +686,8 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[], 
     throw new Error(`${missingProducts} produtos nao foram vinculados antes de inserir o estoque.`);
   }
 
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from("stock_items").insert(rows.slice(i, i + 500));
+  for (let i = 0; i < rows.length; i += 1000) {
+    const { error } = await supabase.from("stock_items").insert(rows.slice(i, i + 1000));
     if (error) throw error;
   }
 }
