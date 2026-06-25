@@ -13,8 +13,10 @@
     }
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-  <script defer src="./app.js?v=20260625-6"></script>
+  <script defer src="./app.js?v=20260625-7"></script>
 </head>
 <body>
   <header class="topbar">
@@ -70,7 +72,16 @@
         <div class="result-actions">
           <button id="toggle-all-products" type="button">Abrir todos</button>
           <button id="group-process-button" type="button">Separar por processo</button>
+          <button id="stock-report-button" type="button">Gerar PDF estoque</button>
+          <button id="stock-compare-button" type="button">Comparar estoque</button>
         </div>
+        <section id="stock-compare-section" class="stock-compare-section" hidden>
+          <div class="section-title">
+            <h2 id="stock-compare-title">Comparação do estoque</h2>
+            <button id="close-stock-compare-button" type="button">Fechar</button>
+          </div>
+          <div id="stock-compare-results"></div>
+        </section>
         <div id="results" class="results"></div>
       </section>
     </div>
@@ -168,6 +179,47 @@
         <div class="modal-actions">
           <button id="signup-button" type="button">Criar acesso</button>
           <button id="login-button" class="primary" type="button">Entrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: relatório PDF de estoque -->
+  <div id="stock-report-modal" class="modal-overlay" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3>Gerar PDF estoque</h3>
+      </div>
+      <div class="modal-body">
+        <div class="report-filter-grid">
+          <label class="form-field">
+            <span>Filtro</span>
+            <select id="stock-report-scope">
+              <option value="visible">Itens visíveis agora</option>
+              <option value="all">Todos</option>
+              <option value="tecidos">Todos tecidos</option>
+              <option value="malhas">Todas malhas</option>
+              <option value="lisa">Lisa</option>
+              <option value="estampada">Estampada</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Buscar</span>
+            <input id="stock-report-search" placeholder="Produto, cor ou processo">
+          </label>
+        </div>
+        <div class="report-actions">
+          <button id="stock-report-select-visible" type="button">Selecionar filtrados</button>
+          <button id="stock-report-clear" type="button">Limpar seleção</button>
+          <span id="stock-report-summary"></span>
+        </div>
+        <div id="stock-report-list" class="product-selector-list report-list"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="stock-report-count">0 item(ns) selecionado(s)</span>
+        <div class="modal-actions">
+          <button id="cancel-stock-report-button" type="button">Cancelar</button>
+          <button id="generate-stock-report-button" class="primary" type="button" disabled>Gerar PDF</button>
         </div>
       </div>
     </div>

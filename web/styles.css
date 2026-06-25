@@ -249,6 +249,12 @@ button.primary, #import-button, #import-avil-button {
   color: #fff;
 }
 
+.stock-compare-section {
+  margin: 12px 0 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
 .results {
   display: grid;
   gap: 8px;
@@ -572,11 +578,44 @@ button.primary, #import-button, #import-avil-button {
 .status-label.inactive { color: var(--muted); }
 
 .modal-small { max-width: 460px; }
+.modal-wide { max-width: 760px; }
 .modal-body-scroll { overflow-y: auto; }
 .form-message { min-height: 18px; color: #9b1c1c; font-size: 12px; }
 .form-section-title { margin: 8px 0 0; color: var(--ink); font-size: 12px; font-weight: 900; text-transform: uppercase; }
 .form-check { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .form-check input { width: 17px; height: 17px; }
+
+.report-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) 1fr;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.report-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.report-list {
+  min-height: 280px;
+}
+
+#stock-report-count,
+#stock-report-summary {
+  color: var(--muted);
+  font-size: 12px;
+}
 
 /* ---------- Mostruário: histórico ---------- */
 
@@ -797,6 +836,7 @@ button.primary, #import-button, #import-avil-button {
   .company-switcher select { min-width: min(160px, 45vw); }
   .toolbar { grid-template-columns: 1fr; }
   .price-toolbar { grid-template-columns: 1fr; }
+  .report-filter-grid { grid-template-columns: 1fr; }
   .price-card { grid-template-columns: 1fr; }
   .commission-grid { justify-content: flex-start; }
   .form-grid { grid-template-columns: 1fr; }
