@@ -2170,7 +2170,24 @@ function slugify(value) {
 
 function readableError(error) {
   if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
+  if (typeof error === "string") {
+    try {
+      const parsed = JSON.parse(error);
+      return readableError(parsed);
+    } catch {
+      return error;
+    }
+  }
+  if (error && typeof error === "object") {
+    if (error.error) return readableError(error.error);
+    if (error.message) return String(error.message);
+    if (Array.isArray(error.summary) && error.summary.length) {
+      return error.summary.map(readableError).join(" | ");
+    }
+    if (error.source || error.status) {
+      return [error.source, error.status, error.details].filter(Boolean).join(" - ") || "Operação não concluída";
+    }
+  }
   try {
     return JSON.stringify(error);
   } catch {
