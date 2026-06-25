@@ -89,6 +89,7 @@ Deno.serve(async (req) => {
 
   let params: Record<string, unknown> = {};
   let avilFile: File | null = null;
+  let avilPdfText: string | null = null;
 
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
@@ -100,6 +101,8 @@ Deno.serve(async (req) => {
         company_id: form.get("company_id"),
       };
       avilFile = form.get("file") as File | null;
+      const rawText = form.get("pdf_text");
+      if (typeof rawText === "string" && rawText.length > 0) avilPdfText = rawText;
     } catch (error) {
       return json({ ok: false, error: `Erro ao ler formulario: ${messageOf(error)}` }, 400);
     }
@@ -140,7 +143,7 @@ Deno.serve(async (req) => {
     if (params.action === "import_avil") {
       if (!avilFile) throw new Error("Arquivo PDF não enviado.");
       const sourceSlug = String(params.source_slug || "");
-      const avilResult = await importAvil(company, sourceSlug, avilFile);
+      const avilResult = await importAvil(company, sourceSlug, avilFile, avilPdfText ?? undefined);
       summary.push(avilResult);
       await supabase.from("import_runs").update({
         status: avilResult.status === "failed" ? "failed" : "success",
@@ -690,7 +693,7 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[], 
 // AVIL TECIDOS — importação via upload de PDF
 // ---------------------------------------------------------------------------
 
-async function importAvil(company: Company, sourceSlug: string, file: File) {
+async function importAvil(company: Company, sourceSlug: string, file: File, preExtractedText?: string) {
   try {
     if (!sourceSlug) throw new Error("source_slug não informado.");
 
@@ -721,7 +724,7 @@ async function importAvil(company: Company, sourceSlug: string, file: File) {
     // Detecta unidade pela slug da fonte
     const unitOverride: "m" | "kg" = sourceSlug.includes("malhas") ? "kg" : "m";
 
-    const text = await extractPdfText(bytes);
+    const text = preExtractedText ?? await extractPdfText(bytes);
     const { items, skipped } = parseAvilPdfText(text);
 
     const driveFileId = uploadError ? `avil-upload-${Date.now()}-${sourceSlug}` : storagePath;
@@ -767,7 +770,12 @@ function classifyAvilLine(line: string): "product" | "reference" | "container" |
 }
 
 function parseAvilPdfText(text: string): { items: ParsedItem[]; skipped: number } {
-  const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const prepared = text
+    .replace(/\r/g, "\n")
+    .replace(/\s+(?=(?:MT|KG)\s+[TM]\.)/g, "\n")
+    .replace(/\s+(?=[TM]\.[A-Z])/g, "\n")
+    .replace(/\s+(?=\d{5}-\d{5}(?:\s+[A-Z]{1,3}\d{3,}(?:\/[A-Z])?)?\s+[\d.]+,\d{2})/g, "\n");
+  const lines = prepared.split(/\n+/).map((s) => s.trim()).filter(Boolean);
   const items: ParsedItem[] = [];
   let skipped = 0;
   let product = "";
@@ -775,6 +783,21 @@ function parseAvilPdfText(text: string): { items: ParsedItem[]; skipped: number 
   let container = "";
 
   for (const line of lines) {
+    const tabular = parseAvilTabularLine(line, product, reference, container);
+    if (tabular.item) {
+      items.push(tabular.item);
+      product = tabular.product;
+      reference = tabular.reference;
+      container = tabular.container;
+      continue;
+    }
+    if (tabular.product || tabular.reference || tabular.container) {
+      product = tabular.product;
+      reference = tabular.reference;
+      container = tabular.container;
+      continue;
+    }
+
     const type = classifyAvilLine(line);
     switch (type) {
       case "skip":
@@ -805,6 +828,68 @@ function parseAvilPdfText(text: string): { items: ParsedItem[]; skipped: number 
   }
 
   return { items: compactItems(items), skipped };
+}
+
+function parseAvilTabularLine(
+  line: string,
+  currentProduct: string,
+  currentReference: string,
+  currentContainer: string,
+): { item: ParsedItem | null; product: string; reference: string; container: string } {
+  const cleaned = cleanText(line)
+    .replace(/^(MT|KG)\s+/i, "")
+    .replace(/\s+E701_CDA\s+/i, " ")
+    .trim();
+
+  if (!cleaned || /^\d{2}\.\d{2}\.\d{4}$/.test(cleaned) || /\bTotal\b/i.test(cleaned)) {
+    return { item: null, product: currentProduct, reference: currentReference, container: currentContainer };
+  }
+
+  const containerPattern = "([A-Z]{1,3}\\d{3,}(?:\\/[A-Z])?|[A-Z]\\d{3,}_[A-Z]+)";
+  const fullRow = cleaned.match(new RegExp(`^(.+?)\\s+(\\d{5}-\\d{5})(?:\\s+${containerPattern})?\\s+([\\d.]+,\\d{2})$`, "i"));
+  if (fullRow && /^[TM]\./i.test(fullRow[1])) {
+    const product = cleanText(fullRow[1]);
+    const reference = fullRow[2];
+    const container = cleanText(fullRow[3] || "");
+    const quantity = parseNumber(fullRow[4]);
+    return {
+      item: quantity > 0 ? { product, color: reference, process: container, quantity } : null,
+      product,
+      reference,
+      container,
+    };
+  }
+
+  const referenceQty = cleaned.match(new RegExp(`^(\\d{5}-\\d{5})(?:\\s+${containerPattern})?\\s+([\\d.]+,\\d{2})$`, "i"));
+  if (referenceQty && currentProduct) {
+    const reference = referenceQty[1];
+    const container = cleanText(referenceQty[2] || currentContainer || "");
+    const quantity = parseNumber(referenceQty[3]);
+    return {
+      item: quantity > 0 ? { product: currentProduct, color: reference, process: container, quantity } : null,
+      product: currentProduct,
+      reference,
+      container,
+    };
+  }
+
+  const containerQty = cleaned.match(new RegExp(`^${containerPattern}\\s+([\\d.]+,\\d{2})$`, "i"));
+  if (containerQty && currentProduct && currentReference) {
+    const container = cleanText(containerQty[1] || currentContainer || "");
+    const quantity = parseNumber(containerQty[2]);
+    return {
+      item: quantity > 0 ? { product: currentProduct, color: currentReference, process: container, quantity } : null,
+      product: currentProduct,
+      reference: currentReference,
+      container,
+    };
+  }
+
+  if (/^[TM]\./i.test(cleaned)) {
+    return { item: null, product: cleaned, reference: "", container: "" };
+  }
+
+  return { item: null, product: currentProduct, reference: currentReference, container: currentContainer };
 }
 
 function parseSpreadsheet(bytes: ArrayBuffer) {
