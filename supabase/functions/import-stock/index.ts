@@ -51,6 +51,7 @@ const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
 const PRICE_DRIVE_FILE_ID = Deno.env.get("PRICE_DRIVE_FILE_ID") || "";
 const PRICE_DRIVE_FOLDER_ID = Deno.env.get("PRICE_DRIVE_FOLDER_ID") || "";
 const LABEL_DRIVE_FOLDER_ID = Deno.env.get("LABEL_DRIVE_FOLDER_ID") || "";
+const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 
 let supabase: ReturnType<typeof createClient>;
 const corsHeaders = {
@@ -86,7 +87,25 @@ Deno.serve(async (req) => {
     return json({ error: "Use POST" }, 405);
   }
 
-  const params = await readRequestJson(req);
+  let params: Record<string, unknown> = {};
+  let avilFile: File | null = null;
+
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    try {
+      const form = await req.formData();
+      params = {
+        action: form.get("action"),
+        source_slug: form.get("source_slug"),
+        company_id: form.get("company_id"),
+      };
+      avilFile = form.get("file") as File | null;
+    } catch (error) {
+      return json({ ok: false, error: `Erro ao ler formulario: ${messageOf(error)}` }, 400);
+    }
+  } else {
+    params = await readRequestJson(req);
+  }
 
   try {
     supabase = createSupabaseAdminClient();
@@ -118,6 +137,22 @@ Deno.serve(async (req) => {
   const summary: Record<string, unknown>[] = [];
 
   try {
+    if (params.action === "import_avil") {
+      if (!avilFile) throw new Error("Arquivo PDF não enviado.");
+      const sourceSlug = String(params.source_slug || "");
+      const avilResult = await importAvil(company, sourceSlug, avilFile);
+      summary.push(avilResult);
+      await supabase.from("import_runs").update({
+        status: avilResult.status === "failed" ? "failed" : "success",
+        summary,
+        finished_at: new Date().toISOString(),
+      }).eq("id", runId);
+      return json(
+        { ok: avilResult.status !== "failed", run_id: runId, summary },
+        avilResult.status === "failed" ? 500 : 200,
+      );
+    }
+
     const token = await getGoogleAccessToken();
 
     if (params.action === "import_prices" || params.import_prices === true) {
@@ -204,6 +239,22 @@ async function authorizeRequest(req: Request, requestedCompanyId: unknown): Prom
   const authorization = req.headers.get("authorization") || "";
   const token = authorization.replace(/^Bearer\s+/i, "").trim();
   if (!token) return { ok: false, status: 401, error: "Entre no sistema para importar arquivos." };
+
+  // Bypass para chamadas agendadas via cron
+  if (CRON_SECRET && token === CRON_SECRET) {
+    let cronQuery = supabase
+      .from("companies")
+      .select("id, organization_id, trade_name, slug, price_drive_folder_id, label_drive_folder_id")
+      .eq("active", true);
+    if (typeof requestedCompanyId === "string" && requestedCompanyId) {
+      cronQuery = cronQuery.eq("id", requestedCompanyId);
+    } else {
+      cronQuery = cronQuery.eq("slug", "beta-importadora");
+    }
+    const { data: company, error: companyError } = await cronQuery.maybeSingle();
+    if (companyError || !company) return { ok: false, status: 404, error: "Empresa nao encontrada." };
+    return { ok: true, company: company as Company };
+  }
 
   const { data: userData, error: userError } = await supabase.auth.getUser(token);
   if (userError || !userData.user) {
@@ -591,7 +642,7 @@ async function recordStockFile(
   return data;
 }
 
-async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) {
+async function upsertItems(source: Source, fileId: string, items: ParsedItem[], unitOverride?: "m" | "kg") {
   const productRows = unique(items.map((i) => normalizeText(i.product))).map((normalized) => {
     const display = items.find((i) => normalizeText(i.product) === normalized)?.product || normalized;
     return {
@@ -599,7 +650,7 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) 
       company_id: source.company_id,
       normalized_name: normalized,
       display_name: display,
-      unit: unitForProduct(display),
+      unit: unitOverride ?? unitForProduct(display),
       updated_at: new Date().toISOString(),
     };
   });
@@ -633,6 +684,127 @@ async function upsertItems(source: Source, fileId: string, items: ParsedItem[]) 
     const { error } = await supabase.from("stock_items").insert(rows.slice(i, i + 500));
     if (error) throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+// AVIL TECIDOS — importação via upload de PDF
+// ---------------------------------------------------------------------------
+
+async function importAvil(company: Company, sourceSlug: string, file: File) {
+  try {
+    if (!sourceSlug) throw new Error("source_slug não informado.");
+
+    const { data: sourceData, error: sourceError } = await supabase
+      .from("stock_sources")
+      .select("id, organization_id, company_id, slug, label, drive_folder_id")
+      .eq("company_id", company.id)
+      .eq("slug", sourceSlug)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (sourceError) throw sourceError;
+    if (!sourceData) throw new Error(`Fonte "${sourceSlug}" não encontrada para esta empresa.`);
+    const source = sourceData as Source;
+
+    const bytes = await file.arrayBuffer();
+    const fileName = file.name || `avil-${Date.now()}.pdf`;
+
+    // Salva PDF original no Storage
+    const storagePath = `${company.id}/${sourceSlug}/${Date.now()}_${fileName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("avil-stock-pdfs")
+      .upload(storagePath, bytes, { contentType: "application/pdf", upsert: false });
+    if (uploadError) {
+      console.warn("Storage upload falhou (prosseguindo):", uploadError.message);
+    }
+
+    // Detecta unidade pela slug da fonte
+    const unitOverride: "m" | "kg" = sourceSlug.includes("malhas") ? "kg" : "m";
+
+    const text = await extractPdfText(bytes);
+    const { items, skipped } = parseAvilPdfText(text);
+
+    const driveFileId = uploadError ? `avil-upload-${Date.now()}-${sourceSlug}` : storagePath;
+
+    const fileRow = await recordStockFile(
+      source,
+      { id: driveFileId, name: fileName, mimeType: "application/pdf" },
+      items.length ? "imported" : "empty",
+      items.length ? null : "Nenhum item extraído do PDF",
+      items,
+      { file_kind: "avil_pdf", storage_path: storagePath, unit: unitOverride, skipped },
+    );
+
+    if (items.length) {
+      await supabase.from("stock_items").delete().eq("file_id", fileRow.id);
+      await upsertItems(source, fileRow.id, items, unitOverride);
+    }
+
+    return {
+      source: source.label,
+      status: items.length ? "imported" : "empty",
+      file: fileName,
+      products: unique(items.map((i) => normalizeText(i.product))).length,
+      items: items.length,
+      skipped,
+    };
+  } catch (error) {
+    return { source: sourceSlug, status: "failed", error: messageOf(error) };
+  }
+}
+
+function classifyAvilLine(line: string): "product" | "reference" | "container" | "quantity" | "skip" {
+  if (/^(TECIDOS|MALHAS|EMB|PRODUTO|COD[_\s]REFERENCIA|NRO[_\s]CONTAINER|MT|KG)$/i.test(line)) return "skip";
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(line)) return "skip";
+  if (/\bTotal\b/i.test(line)) return "skip";
+  if (/^\d{5}-\d{5}$/.test(line)) return "reference";
+  if (/^\d{1,3}(\.\d{3})*,\d{2}$/.test(line)) return "quantity";
+  // Container: letras maiúsculas + dígitos, sem espaços (ex: BG4557/D, GB10937/A, BP13513, E701_CDA)
+  if (/^[A-Z]{1,2}\d{3,}(\/[A-Z])?$/.test(line) || /^[A-Z]\d{3,}_[A-Z]+$/.test(line)) return "container";
+  // Produto: começa com T. ou M. (Tecidos / Malhas)
+  if (/^[MT]\./i.test(line) && line.length > 4) return "product";
+  return "skip";
+}
+
+function parseAvilPdfText(text: string): { items: ParsedItem[]; skipped: number } {
+  const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const items: ParsedItem[] = [];
+  let skipped = 0;
+  let product = "";
+  let reference = "";
+  let container = "";
+
+  for (const line of lines) {
+    const type = classifyAvilLine(line);
+    switch (type) {
+      case "skip":
+        skipped++;
+        break;
+      case "product":
+        product = line;
+        reference = "";
+        container = "";
+        break;
+      case "reference":
+        reference = line;
+        container = "";
+        break;
+      case "container":
+        container = line;
+        break;
+      case "quantity": {
+        if (product && reference) {
+          const qty = parseNumber(line);
+          if (qty > 0) items.push({ product, color: reference, process: container, quantity: qty });
+        } else {
+          skipped++;
+        }
+        break;
+      }
+    }
+  }
+
+  return { items: compactItems(items), skipped };
 }
 
 function parseSpreadsheet(bytes: ArrayBuffer) {

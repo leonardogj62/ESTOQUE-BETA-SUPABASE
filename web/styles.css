@@ -104,10 +104,13 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #
 main { max-width: 1120px; margin: 0 auto; padding: 18px; }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+.toolbar .search {
+  flex: 1 1 220px;
 }
 
 .search {
@@ -139,7 +142,7 @@ button:disabled {
   opacity: .42;
 }
 
-button.primary, #import-button {
+button.primary, #import-button, #import-avil-button {
   background: var(--navy);
   color: #fff;
   border-color: var(--navy);

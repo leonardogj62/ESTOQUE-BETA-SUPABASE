@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gestão Comercial</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-2">
+  <link rel="stylesheet" href="./styles.css?v=20260625-1">
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-  <script defer src="./app.js?v=20260622-2"></script>
+  <script defer src="./app.js?v=20260625-1"></script>
 </head>
 <body>
   <header class="topbar">
@@ -36,6 +36,8 @@
       <button id="refresh-button" type="button">Atualizar</button>
       <button id="import-button" type="button">Importar Drive</button>
       <button id="import-labels-button" type="button">Importar Etiquetas</button>
+      <button id="import-avil-button" type="button" hidden>Enviar PDF AVIL</button>
+      <input id="avil-file-input" type="file" accept=".pdf,application/pdf" hidden>
     </section>
 
     <nav class="tabs" id="main-tabs">

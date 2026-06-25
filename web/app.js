@@ -187,6 +187,8 @@ const els = {
   selectorCount: document.getElementById("selector-count"),
   confirmBtn: document.getElementById("confirm-update-btn"),
   cancelBtn: document.getElementById("cancel-update-btn"),
+  importAvilButton: document.getElementById("import-avil-button"),
+  avilFileInput: document.getElementById("avil-file-input"),
   companySelect: document.getElementById("company-select"),
   accountButton: document.getElementById("account-button"),
   tabCadastros: document.getElementById("tab-cadastros"),
@@ -240,6 +242,8 @@ function bindEvents() {
   els.importButton.addEventListener("click", runImport);
   els.importLabelsButton.addEventListener("click", runLabelImport);
   els.importPricesButton.addEventListener("click", runPriceImport);
+  els.importAvilButton.addEventListener("click", () => els.avilFileInput.click());
+  els.avilFileInput.addEventListener("change", runAvilImport);
   els.newPriceButton.addEventListener("click", openPriceModal);
   els.cancelPriceBtn.addEventListener("click", closePriceModal);
   els.savePriceBtn.addEventListener("click", saveManualPrice);
@@ -309,6 +313,7 @@ function bindEvents() {
     state.companyId = els.companySelect.value;
     localStorage.setItem("estoque_company_id", state.companyId);
     resetResultExpansion();
+    syncAccessUi();
     await refreshAll();
     if (!els.tabCadastros.hidden) await loadRegistry();
   });
@@ -485,12 +490,26 @@ function sessionUserId() {
 
 function syncAccessUi() {
   const signedIn = Boolean(state.session?.access_token && state.membership);
+  const company = currentCompany();
+  const isAvil = company?.slug === "avil-tecidos";
+
   const label = state.session?.user?.email || "Sair";
   els.accountButton.textContent = signedIn ? label : "Entrar";
+
   [els.importButton, els.importLabelsButton, els.importPricesButton, els.newPriceButton, els.newUpdateBtn].forEach((button) => {
     button.disabled = !signedIn;
     button.title = signedIn ? "" : "Entre para alterar dados";
   });
+
+  // Botão Drive: esconde para AVIL (ela não tem pasta no Drive)
+  els.importButton.hidden = isAvil;
+  els.importLabelsButton.hidden = isAvil;
+
+  // Botão AVIL: aparece só para empresa AVIL, requer login
+  els.importAvilButton.hidden = !isAvil;
+  els.importAvilButton.disabled = !signedIn;
+  els.importAvilButton.title = signedIn ? "" : "Entre para enviar estoque";
+
   els.newRegistryButton.disabled = !signedIn;
   els.registrySummary.textContent = signedIn
     ? "Cadastros do escritório e da empresa ativa"
@@ -770,6 +789,54 @@ async function runLabelImport() {
   } finally {
     els.importLabelsButton.disabled = false;
     els.importLabelsButton.textContent = "Importar Etiquetas";
+  }
+}
+
+async function runAvilImport() {
+  if (!requireSession()) return;
+  const file = els.avilFileInput.files?.[0];
+  if (!file) return;
+
+  // Detecta a fonte pela slug baseado no nome do arquivo
+  const nameLower = file.name.toLowerCase();
+  const sourceSlug = nameLower.includes("malhas") ? "avil-malhas-estoque" : "avil-tecidos-estoque";
+  const sourceLabel = nameLower.includes("malhas") ? "AVIL Malhas" : "AVIL Tecidos";
+
+  els.importAvilButton.disabled = true;
+  els.importAvilButton.textContent = "Enviando...";
+  els.status.textContent = `Importando ${sourceLabel}...`;
+
+  try {
+    const authHeaders = requestHeaders();
+    const form = new FormData();
+    form.append("action", "import_avil");
+    form.append("company_id", state.companyId);
+    form.append("source_slug", sourceSlug);
+    form.append("file", file);
+
+    const res = await fetch(CONFIG.importFunctionUrl, {
+      method: "POST",
+      headers: { authorization: authHeaders.authorization || "" },
+      body: form,
+    });
+    const payload = await res.json();
+
+    if (!res.ok || payload.ok === false) {
+      throw new Error(readableError(payload.error || payload || "Importação AVIL falhou"));
+    }
+
+    const result = payload.summary?.[0] || {};
+    const itemCount = result.items ?? result.colors ?? 0;
+    const skipped = result.skipped ?? 0;
+    els.status.textContent = `${sourceLabel} importado: ${itemCount} itens, ${skipped} linhas ignoradas`;
+
+    await refreshAll();
+  } catch (error) {
+    els.status.textContent = readableError(error);
+  } finally {
+    els.importAvilButton.disabled = false;
+    els.importAvilButton.textContent = "Enviar PDF AVIL";
+    els.avilFileInput.value = "";
   }
 }
 
