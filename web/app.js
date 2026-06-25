@@ -213,6 +213,12 @@ const els = {
 
 const configured = !CONFIG.supabaseUrl.startsWith("COLE_AQUI");
 
+// Configura worker do pdfjs (carregado via CDN no index.html)
+if (typeof window !== "undefined" && window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+
 boot();
 
 async function boot() {
@@ -793,6 +799,20 @@ async function runLabelImport() {
   }
 }
 
+async function extractPdfTextBrowser(file) {
+  const lib = window.pdfjsLib;
+  if (!lib) throw new Error("pdfjs não carregado");
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item) => item.str || "").join(" "));
+  }
+  return pages.join("\n");
+}
+
 async function checkShareTarget() {
   const params = new URLSearchParams(location.search);
   if (!params.has("avil-import")) return;
@@ -844,16 +864,22 @@ async function runAvilImport() {
   const sourceLabel = nameLower.includes("malhas") ? "AVIL Malhas" : "AVIL Tecidos";
 
   els.importAvilButton.disabled = true;
-  els.importAvilButton.textContent = "Enviando...";
-  els.status.textContent = `Importando ${sourceLabel}...`;
+  els.importAvilButton.textContent = "Lendo PDF...";
+  els.status.textContent = `Lendo ${sourceLabel}...`;
 
   try {
+    const pdfText = await extractPdfTextBrowser(file);
+
+    els.importAvilButton.textContent = "Enviando...";
+    els.status.textContent = `Importando ${sourceLabel}...`;
+
     const authHeaders = requestHeaders();
     const form = new FormData();
     form.append("action", "import_avil");
     form.append("company_id", state.companyId);
     form.append("source_slug", sourceSlug);
     form.append("file", file);
+    form.append("pdf_text", pdfText);
 
     const res = await fetch(CONFIG.importFunctionUrl, {
       method: "POST",
