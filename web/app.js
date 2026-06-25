@@ -804,13 +804,37 @@ async function extractPdfTextBrowser(file) {
   if (!lib) throw new Error("pdfjs não carregado");
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await lib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-  const pages = [];
+  const pageTexts = [];
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    pages.push(content.items.map((item) => item.str || "").join(" "));
+
+    // Agrupa itens pelo Y arredondado para reconstruir linhas
+    const lineMap = new Map();
+    for (const item of content.items) {
+      if (!item.str) continue;
+      const y = Math.round(item.transform[5]);
+      if (!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y).push({ x: item.transform[4], str: item.str });
+    }
+
+    // Ordena por Y decrescente (PDF conta de baixo pra cima), X crescente dentro de cada linha
+    const lines = [...lineMap.keys()]
+      .sort((a, b) => b - a)
+      .map((y) =>
+        lineMap.get(y)
+          .sort((a, b) => a.x - b.x)
+          .map((it) => it.str)
+          .join(" ")
+          .trim()
+      )
+      .filter(Boolean);
+
+    pageTexts.push(lines.join("\n"));
   }
-  return pages.join("\n");
+
+  return pageTexts.join("\n");
 }
 
 async function checkShareTarget() {
