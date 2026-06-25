@@ -228,6 +228,7 @@ async function boot() {
   renderCompanySwitcher();
   syncAccessUi();
   await refreshAll();
+  await checkShareTarget();
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -789,6 +790,46 @@ async function runLabelImport() {
   } finally {
     els.importLabelsButton.disabled = false;
     els.importLabelsButton.textContent = "Importar Etiquetas";
+  }
+}
+
+async function checkShareTarget() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("avil-import")) return;
+  history.replaceState(null, "", location.pathname);
+
+  try {
+    const cache = await caches.open("avil-pending-v1");
+    const cached = await cache.match("/pending-avil-file");
+    if (!cached) return;
+
+    const fileName = cached.headers.get("X-File-Name") || "avil.pdf";
+    const bytes = await cached.arrayBuffer();
+    await cache.delete("/pending-avil-file");
+
+    const file = new File([bytes], fileName, { type: "application/pdf" });
+
+    // Muda para empresa AVIL automaticamente se disponível
+    const avilCompany = state.companies.find((c) => c.slug === "avil-tecidos");
+    if (avilCompany && state.companyId !== String(avilCompany.id)) {
+      state.companyId = String(avilCompany.id);
+      els.companySelect.value = state.companyId;
+      localStorage.setItem("estoque_company_id", state.companyId);
+      syncAccessUi();
+    }
+
+    if (!state.session?.access_token || !state.membership) {
+      els.status.textContent = `PDF "${fileName}" recebido — Entre para importar o estoque AVIL.`;
+      return;
+    }
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    els.avilFileInput.files = dt.files;
+    await runAvilImport();
+  } catch (err) {
+    els.status.textContent = "Erro ao receber arquivo compartilhado.";
+    console.error("[share-target]", err);
   }
 }
 
