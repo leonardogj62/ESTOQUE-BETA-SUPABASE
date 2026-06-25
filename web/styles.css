@@ -207,9 +207,16 @@ button.primary, #import-button, #import-avil-button {
 
 .filters {
   display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.filter-group {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 12px;
 }
 
 .filter {

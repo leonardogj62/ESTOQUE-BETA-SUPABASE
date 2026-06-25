@@ -16,6 +16,7 @@ const state = {
   labels: [],
   query: "",
   source: "todos",
+  avilFinish: "todos",
   priceQuery: "",
   priceCurrency: "todos",
   groupByProcess: false,
@@ -35,6 +36,13 @@ const state = {
     companySources: [],
   },
 };
+
+const AVIL_SOURCE_SLUGS = new Set(["avil-malhas-estoque", "avil-tecidos-estoque"]);
+const AVIL_FINISH_FILTERS = [
+  { slug: "todos", label: "Todos" },
+  { slug: "lisa", label: "Lisa" },
+  { slug: "estampada", label: "Estampada" },
+];
 
 const REGISTRY_CONFIG = {
   companies: {
@@ -1031,11 +1039,25 @@ function renderHealth() {
 function renderFilters() {
   const labels = [{ slug: "todos", label: "Todos" }]
     .concat(state.health.map((h) => ({ slug: h.slug, label: h.label })));
-  els.filters.innerHTML = labels.map((item) => (
-    `<button class="filter ${state.source === item.slug ? "active" : ""}" data-source="${item.slug}">${escapeHtml(item.label)}</button>`
-  )).join("");
+  const hasAvil = hasAvilRows();
+  if (!hasAvil) state.avilFinish = "todos";
 
-  els.filters.querySelectorAll(".filter").forEach((button) => {
+  els.filters.innerHTML = `
+    <div class="filter-group">
+      ${labels.map((item) => (
+        `<button class="filter ${state.source === item.slug ? "active" : ""}" data-source="${item.slug}">${escapeHtml(item.label)}</button>`
+      )).join("")}
+    </div>
+    ${hasAvil ? `
+      <div class="filter-group">
+        ${AVIL_FINISH_FILTERS.map((item) => (
+          `<button class="filter ${state.avilFinish === item.slug ? "active" : ""}" data-avil-finish="${item.slug}">${escapeHtml(item.label)}</button>`
+        )).join("")}
+      </div>
+    ` : ""}
+  `;
+
+  els.filters.querySelectorAll("[data-source]").forEach((button) => {
     button.addEventListener("click", () => {
       state.source = button.dataset.source;
       resetResultExpansion();
@@ -1043,18 +1065,50 @@ function renderFilters() {
       renderResults();
     });
   });
+  els.filters.querySelectorAll("[data-avil-finish]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.avilFinish = button.dataset.avilFinish || "todos";
+      resetResultExpansion();
+      renderFilters();
+      renderResults();
+    });
+  });
 }
 
-function renderResults() {
-  const filtered = state.rows.filter((row) => {
+function filteredStockRows() {
+  return state.rows.filter((row) => {
     const bySource = state.source === "todos" || row.source_slug === state.source;
     if (!bySource) return false;
+    if (!matchesAvilFinish(row)) return false;
+
     const q = normalize(state.query);
     if (!q) return true;
     return normalize(row.product_name).includes(q)
       || normalize(row.color_name).includes(q)
       || normalize(row.process_code || "").includes(q);
   });
+}
+
+function hasAvilRows() {
+  return state.rows.some((row) => AVIL_SOURCE_SLUGS.has(row.source_slug));
+}
+
+function matchesAvilFinish(row) {
+  if (state.avilFinish === "todos") return true;
+  if (!AVIL_SOURCE_SLUGS.has(row.source_slug)) return true;
+
+  const product = normalize(row.product_name);
+  if (state.avilFinish === "lisa") {
+    return /\bLISA\b|\bLISO\b/.test(product);
+  }
+  if (state.avilFinish === "estampada") {
+    return /\bESTAMPAD[OA]S?\b|\bEST\b/.test(product);
+  }
+  return true;
+}
+
+function renderResults() {
+  const filtered = filteredStockRows();
 
   if (!filtered.length) {
     renderEmpty("Nenhum produto encontrado", "Tente outro filtro ou rode uma nova importação.");
@@ -1309,15 +1363,7 @@ function toggleWashingBlock(key) {
 }
 
 function toggleAllCurrentResults() {
-  const filtered = state.rows.filter((row) => {
-    const bySource = state.source === "todos" || row.source_slug === state.source;
-    if (!bySource) return false;
-    const q = normalize(state.query);
-    if (!q) return true;
-    return normalize(row.product_name).includes(q)
-      || normalize(row.color_name).includes(q)
-      || normalize(row.process_code || "").includes(q);
-  });
+  const filtered = filteredStockRows();
   const grouped = state.groupByProcess ? groupByProductProcess(filtered) : groupByProduct(filtered);
   state.expandedAllResults = !state.expandedAllResults;
   state.expandedResults = state.expandedAllResults
