@@ -28,6 +28,13 @@ const state = {
     query: "",
     selected: new Set(),
   },
+  compare: {
+    source: "visible",
+    finish: "todos",
+    query: "",
+    kinds: new Set(["esgotou", "voltou", "diminuiu", "aumentou", "novo"]),
+    result: null,
+  },
   showroom: {
     updates: [],
     itemCounts: new Map(),
@@ -166,14 +173,17 @@ const els = {
   groupProcessButton: document.getElementById("group-process-button"),
   stockReportButton: document.getElementById("stock-report-button"),
   stockCompareButton: document.getElementById("stock-compare-button"),
-  stockCompareSection: document.getElementById("stock-compare-section"),
+  stockComparePage: document.getElementById("stock-compare-page"),
   stockCompareTitle: document.getElementById("stock-compare-title"),
+  stockCompareSubtitle: document.getElementById("stock-compare-subtitle"),
   stockCompareResults: document.getElementById("stock-compare-results"),
-  closeStockCompareButton: document.getElementById("close-stock-compare-button"),
+  backStockCompareButton: document.getElementById("back-stock-compare-button"),
+  generateStockComparePdfButton: document.getElementById("generate-stock-compare-pdf-button"),
   results: document.getElementById("results"),
   count: document.getElementById("result-count"),
   emptyTemplate: document.getElementById("empty-template"),
   // abas
+  mainTabs: document.getElementById("main-tabs"),
   tabBusca: document.getElementById("tab-busca"),
   tabMostruario: document.getElementById("tab-mostruario"),
   tabPrecos: document.getElementById("tab-precos"),
@@ -238,6 +248,12 @@ const els = {
   stockReportCount: document.getElementById("stock-report-count"),
   cancelStockReportButton: document.getElementById("cancel-stock-report-button"),
   generateStockReportButton: document.getElementById("generate-stock-report-button"),
+  stockCompareModal: document.getElementById("stock-compare-modal"),
+  stockCompareSource: document.getElementById("stock-compare-source"),
+  stockCompareFinish: document.getElementById("stock-compare-finish"),
+  stockCompareSearch: document.getElementById("stock-compare-search"),
+  cancelStockCompareButton: document.getElementById("cancel-stock-compare-button"),
+  runStockCompareButton: document.getElementById("run-stock-compare-button"),
 };
 
 const configured = !CONFIG.supabaseUrl.startsWith("COLE_AQUI");
@@ -301,10 +317,14 @@ function bindEvents() {
     renderResults();
   });
   els.stockReportButton.addEventListener("click", openStockReportModal);
-  els.stockCompareButton.addEventListener("click", compareStockFiles);
-  els.closeStockCompareButton.addEventListener("click", () => {
-    els.stockCompareSection.hidden = true;
+  els.stockCompareButton.addEventListener("click", openStockCompareModal);
+  els.cancelStockCompareButton.addEventListener("click", closeStockCompareModal);
+  els.stockCompareModal.addEventListener("click", (event) => {
+    if (event.target === els.stockCompareModal) closeStockCompareModal();
   });
+  els.runStockCompareButton.addEventListener("click", runStockComparisonReport);
+  els.backStockCompareButton.addEventListener("click", closeStockComparisonPage);
+  els.generateStockComparePdfButton.addEventListener("click", generateStockComparePdf);
   els.cancelStockReportButton.addEventListener("click", closeStockReportModal);
   els.stockReportModal.addEventListener("click", (event) => {
     if (event.target === els.stockReportModal) closeStockReportModal();
@@ -428,6 +448,7 @@ function bindEvents() {
 // ---------------------------------------------------------------------------
 
 function switchTab(tabName) {
+  closeStockComparisonPage();
   els.tabBusca.hidden = tabName !== "busca";
   els.tabMostruario.hidden = tabName !== "mostruario";
   els.tabPrecos.hidden = tabName !== "precos";
@@ -1409,23 +1430,91 @@ function compareStockRows(a, b) {
 // Comparação de estoque importado
 // ---------------------------------------------------------------------------
 
-async function compareStockFiles() {
+function openStockCompareModal() {
+  populateStockCompareSourceOptions();
+  state.compare.source = "visible";
+  state.compare.finish = state.avilFinish || "todos";
+  state.compare.query = state.query || "";
+  state.compare.kinds = new Set(["esgotou", "voltou", "diminuiu", "aumentou", "novo"]);
+  els.stockCompareSource.value = state.compare.source;
+  els.stockCompareFinish.value = state.compare.finish;
+  els.stockCompareSearch.value = state.compare.query;
+  document.querySelectorAll("[name='stock-compare-kind']").forEach((input) => {
+    input.checked = true;
+  });
+  els.stockCompareModal.hidden = false;
+}
+
+function closeStockCompareModal() {
+  els.stockCompareModal.hidden = true;
+}
+
+function populateStockCompareSourceOptions() {
+  const fixed = [
+    ["visible", "Filtro atual da busca"],
+    ["all", "Todos"],
+    ["tecidos", "Todos tecidos"],
+    ["malhas", "Todas malhas"],
+  ];
+  const sourceOptions = state.health.map((source) => [source.slug, source.label]);
+  els.stockCompareSource.innerHTML = fixed.concat(sourceOptions).map(([value, label]) => (
+    `<option value="${escapeAttr(value)}">${escapeHtml(label)}</option>`
+  )).join("");
+}
+
+async function runStockComparisonReport() {
   if (!state.companyId) return;
-  els.stockCompareSection.hidden = false;
-  els.stockCompareTitle.textContent = "Comparação do estoque";
+  const filters = readStockCompareFilters();
+  closeStockCompareModal();
+  showStockComparisonPage();
+  els.stockCompareTitle.textContent = "Relatório de comparação";
+  els.stockCompareSubtitle.textContent = comparisonFilterSummary(filters);
   els.stockCompareResults.innerHTML = "<p class=\"showroom-loading\">Comparando último estoque com histórico...</p>";
-  els.stockCompareSection.scrollIntoView({ behavior: "smooth" });
+  els.generateStockComparePdfButton.disabled = true;
 
   try {
-    const comparison = await buildStockComparison();
+    const comparison = await buildStockComparison(filters);
+    state.compare.result = comparison;
     renderStockComparison(comparison);
   } catch (error) {
+    state.compare.result = null;
     els.stockCompareResults.innerHTML = `<div class="empty"><strong>Erro ao comparar estoque</strong><p>${escapeHtml(readableError(error))}</p></div>`;
   }
 }
 
-async function buildStockComparison() {
-  const activeSources = comparisonSourceSlugs();
+function readStockCompareFilters() {
+  const kinds = new Set([...document.querySelectorAll("[name='stock-compare-kind']:checked")].map((input) => input.value));
+  return {
+    source: els.stockCompareSource.value || "visible",
+    finish: els.stockCompareFinish.value || "todos",
+    query: els.stockCompareSearch.value.trim(),
+    kinds: kinds.size ? kinds : new Set(["esgotou", "voltou", "diminuiu", "aumentou", "novo"]),
+  };
+}
+
+function showStockComparisonPage() {
+  els.mainTabs.hidden = true;
+  els.tabBusca.hidden = true;
+  els.tabMostruario.hidden = true;
+  els.tabPrecos.hidden = true;
+  els.tabCadastros.hidden = true;
+  els.stockComparePage.hidden = false;
+  els.stockComparePage.scrollIntoView({ behavior: "smooth" });
+}
+
+function closeStockComparisonPage() {
+  if (!els.stockComparePage || els.stockComparePage.hidden) return;
+  els.stockComparePage.hidden = true;
+  els.mainTabs.hidden = false;
+  const active = document.querySelector(".tab.active")?.dataset.tab || "busca";
+  els.tabBusca.hidden = active !== "busca";
+  els.tabMostruario.hidden = active !== "mostruario";
+  els.tabPrecos.hidden = active !== "precos";
+  els.tabCadastros.hidden = active !== "cadastros";
+}
+
+async function buildStockComparison(filters = defaultStockCompareFilters()) {
+  const activeSources = comparisonSourceSlugs(filters);
   if (!activeSources.length) {
     return { status: "empty", groups: [], sourcePairs: [] };
   }
@@ -1478,9 +1567,9 @@ async function buildStockComparison() {
   };
 
   for (const pair of comparable) {
-    const currentRows = filterComparisonItems(itemsByFile.get(pair.current.id) || []);
-    const previousRows = filterComparisonItems(itemsByFile.get(pair.previous.id) || []);
-    const olderRows = filterComparisonItems(pair.files.slice(1).flatMap((file) => itemsByFile.get(file.id) || []));
+    const currentRows = filterComparisonItems(itemsByFile.get(pair.current.id) || [], filters);
+    const previousRows = filterComparisonItems(itemsByFile.get(pair.previous.id) || [], filters);
+    const olderRows = filterComparisonItems(pair.files.slice(1).flatMap((file) => itemsByFile.get(file.id) || []), filters);
     const currentMap = new Map(currentRows.map((item) => [stockItemHistoryKey(item), item]));
     const previousMap = new Map(previousRows.map((item) => [stockItemHistoryKey(item), item]));
     const olderKeys = new Set(olderRows.map(stockItemHistoryKey));
@@ -1494,6 +1583,7 @@ async function buildStockComparison() {
       const item = current || previous;
       const row = comparisonRow(item, pair.source, previousQty, currentQty);
 
+      if (!matchesComparisonSearch(row, filters.query)) continue;
       if (previousQty > 0 && currentQty <= 0) buckets.esgotou.push(row);
       else if (previousQty <= 0 && currentQty > 0 && olderKeys.has(key)) buckets.voltou.push(row);
       else if (previousQty <= 0 && currentQty > 0) buckets.novo.push(row);
@@ -1502,18 +1592,54 @@ async function buildStockComparison() {
     }
   }
 
+  Object.keys(buckets).forEach((key) => {
+    if (!filters.kinds.has(key)) buckets[key] = [];
+  });
   Object.values(buckets).forEach((rows) => rows.sort(compareComparisonRows));
-  return { status: "ok", groups: buckets, sourcePairs };
+  return { status: "ok", groups: buckets, sourcePairs, filters };
 }
 
-function comparisonSourceSlugs() {
-  if (state.source !== "todos") return [state.source];
-  return state.health.map((source) => source.slug).filter(Boolean);
+function defaultStockCompareFilters() {
+  return {
+    source: "visible",
+    finish: state.avilFinish || "todos",
+    query: state.query || "",
+    kinds: new Set(["esgotou", "voltou", "diminuiu", "aumentou", "novo"]),
+  };
 }
 
-function filterComparisonItems(items) {
-  if (state.avilFinish === "todos") return items;
-  return items.filter((item) => matchesFinish({ product_name: productDisplayName(item) }, state.avilFinish));
+function comparisonSourceSlugs(filters) {
+  if (filters.source === "visible") {
+    return state.source !== "todos"
+      ? [state.source]
+      : state.health.map((source) => source.slug).filter(Boolean);
+  }
+  if (filters.source === "all") return state.health.map((source) => source.slug).filter(Boolean);
+  if (filters.source === "malhas") return state.health.filter(isMalhaSource).map((source) => source.slug);
+  if (filters.source === "tecidos") return state.health.filter(isTecidoSource).map((source) => source.slug);
+  return [filters.source].filter(Boolean);
+}
+
+function isMalhaSource(source) {
+  return source.slug === "avil-malhas-estoque" || /\bMALHAS?\b/.test(normalize(source.label));
+}
+
+function isTecidoSource(source) {
+  return source.slug === "avil-tecidos-estoque" || /\bTECIDOS?\b/.test(normalize(source.label));
+}
+
+function filterComparisonItems(items, filters) {
+  if (filters.finish === "todos") return items;
+  return items.filter((item) => matchesFinish({ product_name: productDisplayName(item) }, filters.finish));
+}
+
+function matchesComparisonSearch(row, query) {
+  const q = normalize(query);
+  if (!q) return true;
+  return normalize(row.product_name).includes(q)
+    || normalize(row.source_label).includes(q)
+    || normalize(row.color_name).includes(q)
+    || normalize(row.process_code).includes(q);
 }
 
 function stockItemHistoryKey(item) {
@@ -1554,6 +1680,8 @@ function compareComparisonRows(a, b) {
 }
 
 function renderStockComparison({ status, groups, sourcePairs }) {
+  els.generateStockComparePdfButton.disabled = status !== "ok";
+
   if (status === "empty") {
     els.stockCompareResults.innerHTML = `<div class="empty"><strong>Nenhuma fonte encontrada para comparar.</strong></div>`;
     return;
@@ -1628,6 +1756,148 @@ function renderStockDiffTable(rows, title, rowClass) {
       </div>
     </details>
   `;
+}
+
+function comparisonFilterSummary(filters) {
+  const sourceLabel = compareSourceLabel(filters.source);
+  const finishLabel = AVIL_FINISH_FILTERS.find((item) => item.slug === filters.finish)?.label || "Todos";
+  const kinds = [...filters.kinds].map(comparisonKindLabel).join(", ");
+  return [
+    `Fonte: ${sourceLabel}`,
+    `Acabamento: ${finishLabel}`,
+    filters.query && `Busca: ${filters.query}`,
+    `Alterações: ${kinds}`,
+  ].filter(Boolean).join(" · ");
+}
+
+function compareSourceLabel(source) {
+  if (source === "visible") return "Filtro atual da busca";
+  if (source === "all") return "Todos";
+  if (source === "tecidos") return "Todos tecidos";
+  if (source === "malhas") return "Todas malhas";
+  return state.health.find((item) => item.slug === source)?.label || source;
+}
+
+function comparisonKindLabel(kind) {
+  return {
+    esgotou: "Esgotou",
+    voltou: "Voltou",
+    diminuiu: "Diminuiu",
+    aumentou: "Aumentou",
+    novo: "Novo",
+  }[kind] || kind;
+}
+
+function comparisonKindClass(kind) {
+  return {
+    esgotou: "row-down",
+    voltou: "row-up",
+    diminuiu: "row-down",
+    aumentou: "row-up",
+    novo: "row-new",
+  }[kind] || "";
+}
+
+function comparisonGroupsList(groups) {
+  return [
+    ["esgotou", "Esgotou", groups.esgotou || []],
+    ["voltou", "Voltou para o estoque", groups.voltou || []],
+    ["diminuiu", "Diminuiu", groups.diminuiu || []],
+    ["aumentou", "Aumentou", groups.aumentou || []],
+    ["novo", "Novo", groups.novo || []],
+  ];
+}
+
+async function generateStockComparePdf() {
+  const result = state.compare.result;
+  if (!result || result.status !== "ok") {
+    alert("Gere uma comparação antes de baixar o PDF.");
+    return;
+  }
+  const jsPdf = window.jspdf?.jsPDF;
+  if (!jsPdf) {
+    alert("Gerador de PDF ainda não carregou. Tente novamente em alguns segundos.");
+    return;
+  }
+
+  els.generateStockComparePdfButton.disabled = true;
+  els.generateStockComparePdfButton.textContent = "Gerando...";
+  try {
+    const doc = new jsPdf({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const isAvilReport = currentCompany()?.slug === "avil-tecidos";
+    const titleY = isAvilReport ? 42 : 16;
+    if (isAvilReport) {
+      const logo = await loadImageDataUrl("./assets/avil-logo.jpg");
+      if (logo) doc.addImage(logo, "JPEG", (pageWidth - 38) / 2, 8, 38, 25);
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("Relatorio de comparacao de estoque", pageWidth / 2, titleY, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`${currentCompany()?.trade_name || "Empresa"} · ${new Date().toLocaleString("pt-BR")}`, pageWidth / 2, titleY + 6, { align: "center" });
+    doc.text(comparisonFilterSummary(result.filters), pageWidth / 2, titleY + 11, { align: "center", maxWidth: pageWidth - 24 });
+
+    let startY = titleY + 18;
+    for (const [kind, title, rows] of comparisonGroupsList(result.groups)) {
+      if (!rows.length) continue;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`${title} · ${rows.length}`, 10, startY);
+      doc.autoTable({
+        startY: startY + 3,
+        head: [["Produto", "Fonte", "Cor", "Processo", "Antes", "Agora", "Dif."]],
+        body: rows.map((row) => [
+          row.product_name || "",
+          row.source_label || "",
+          row.color_name || "",
+          row.process_code || "",
+          formatQuantity(row.prev_quantity, row.unit),
+          formatQuantity(row.curr_quantity, row.unit),
+          formatSignedQuantity(row.delta, row.unit),
+        ]),
+        styles: { fontSize: 7, cellPadding: 1.4, overflow: "linebreak", valign: "middle" },
+        headStyles: { fillColor: [0, 72, 124], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 247, 243] },
+        columnStyles: {
+          0: { cellWidth: 74 },
+          1: { cellWidth: 34 },
+          2: { cellWidth: 34 },
+          3: { cellWidth: 34 },
+          4: { cellWidth: 24, halign: "right" },
+          5: { cellWidth: 24, halign: "right" },
+          6: { cellWidth: 24, halign: "right" },
+        },
+        margin: { left: 10, right: 10 },
+        didParseCell: (data) => {
+          if (data.section !== "body") return;
+          const cls = comparisonKindClass(kind);
+          if (cls === "row-up") data.cell.styles.fillColor = [240, 252, 232];
+          if (cls === "row-down") data.cell.styles.fillColor = [252, 232, 232];
+          if (cls === "row-new") data.cell.styles.fillColor = [232, 240, 252];
+        },
+        didDrawPage: () => {
+          doc.setFontSize(8);
+          doc.setTextColor(120);
+          doc.text(`Pagina ${doc.internal.getNumberOfPages()}`, pageWidth - 12, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+        },
+      });
+      startY = doc.lastAutoTable.finalY + 9;
+      if (startY > doc.internal.pageSize.getHeight() - 24) {
+        doc.addPage();
+        startY = 14;
+      }
+    }
+
+    doc.save(`comparacao-estoque-${slugify(currentCompany()?.trade_name || "empresa")}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (error) {
+    alert("Não foi possível gerar o PDF da comparação: " + readableError(error));
+  } finally {
+    els.generateStockComparePdfButton.disabled = false;
+    els.generateStockComparePdfButton.textContent = "Gerar PDF";
+  }
 }
 
 function groupByProduct(rows) {

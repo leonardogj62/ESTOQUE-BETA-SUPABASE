@@ -264,6 +264,39 @@ button.primary, #import-button, #import-avil-button {
   border-top: 1px solid var(--line);
 }
 
+.report-page {
+  display: grid;
+  gap: 16px;
+}
+
+.report-page-title {
+  align-items: flex-start;
+}
+
+.report-page-title h2 {
+  margin-top: 0;
+}
+
+.report-page-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.report-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-page-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
 .results {
   display: grid;
   gap: 8px;
@@ -875,6 +908,9 @@ button.primary, #import-button, #import-avil-button {
   .commission-grid { justify-content: flex-start; }
   .form-grid { grid-template-columns: 1fr; }
   .health-grid { grid-template-columns: 1fr 1fr; }
+  .report-page-title { display: grid; gap: 10px; }
+  .report-page-actions { justify-content: stretch; }
+  .report-page-actions button { flex: 1 1 140px; }
   .diff-table { font-size: 12px; }
   .diff-table th, .diff-table td { padding: 7px 8px; }
   .tabs { overflow-x: auto; }

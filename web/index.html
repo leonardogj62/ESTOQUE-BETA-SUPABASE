@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a1a2e">
   <title>Gestão Comercial</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=20260625-4">
+  <link rel="stylesheet" href="./styles.css?v=20260625-5">
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js');
@@ -16,7 +16,7 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-  <script defer src="./app.js?v=20260625-7"></script>
+  <script defer src="./app.js?v=20260625-8"></script>
 </head>
 <body>
   <header class="topbar">
@@ -75,14 +75,23 @@
           <button id="stock-report-button" type="button">Gerar PDF estoque</button>
           <button id="stock-compare-button" type="button">Comparar estoque</button>
         </div>
-        <section id="stock-compare-section" class="stock-compare-section" hidden>
-          <div class="section-title">
-            <h2 id="stock-compare-title">Comparação do estoque</h2>
-            <button id="close-stock-compare-button" type="button">Fechar</button>
-          </div>
-          <div id="stock-compare-results"></div>
-        </section>
         <div id="results" class="results"></div>
+      </section>
+    </div>
+
+    <div id="stock-compare-page" class="report-page" hidden>
+      <section>
+        <div class="section-title report-page-title">
+          <div>
+            <h2 id="stock-compare-title">Relatório de comparação</h2>
+            <p id="stock-compare-subtitle" class="report-page-subtitle"></p>
+          </div>
+          <div class="report-page-actions">
+            <button id="back-stock-compare-button" type="button">Voltar</button>
+            <button id="generate-stock-compare-pdf-button" class="primary" type="button">Gerar PDF</button>
+          </div>
+        </div>
+        <div id="stock-compare-results"></div>
       </section>
     </div>
 
@@ -221,6 +230,48 @@
           <button id="cancel-stock-report-button" type="button">Cancelar</button>
           <button id="generate-stock-report-button" class="primary" type="button" disabled>Gerar PDF</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: filtros da comparação de estoque -->
+  <div id="stock-compare-modal" class="modal-overlay" hidden>
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <h3>Comparar estoque</h3>
+      </div>
+      <div class="modal-body modal-body-scroll">
+        <label class="form-field">
+          <span>Fonte</span>
+          <select id="stock-compare-source">
+            <option value="visible">Filtro atual da busca</option>
+            <option value="all">Todos</option>
+            <option value="tecidos">Todos tecidos</option>
+            <option value="malhas">Todas malhas</option>
+          </select>
+        </label>
+        <label class="form-field">
+          <span>Acabamento</span>
+          <select id="stock-compare-finish">
+            <option value="todos">Todos</option>
+            <option value="lisa">Lisa</option>
+            <option value="estampada">Estampada</option>
+          </select>
+        </label>
+        <label class="form-field">
+          <span>Buscar</span>
+          <input id="stock-compare-search" placeholder="Produto, cor ou processo">
+        </label>
+        <div class="form-section-title">Alterações</div>
+        <label class="form-check"><input type="checkbox" name="stock-compare-kind" value="esgotou" checked> Esgotou</label>
+        <label class="form-check"><input type="checkbox" name="stock-compare-kind" value="voltou" checked> Voltou para o estoque</label>
+        <label class="form-check"><input type="checkbox" name="stock-compare-kind" value="diminuiu" checked> Diminuiu</label>
+        <label class="form-check"><input type="checkbox" name="stock-compare-kind" value="aumentou" checked> Aumentou</label>
+        <label class="form-check"><input type="checkbox" name="stock-compare-kind" value="novo" checked> Novo</label>
+      </div>
+      <div class="modal-footer">
+        <button id="cancel-stock-compare-button" type="button">Cancelar</button>
+        <button id="run-stock-compare-button" class="primary" type="button">Gerar relatório</button>
       </div>
     </div>
   </div>
