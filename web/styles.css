@@ -447,27 +447,34 @@ button.primary, #import-button, #import-avil-button {
 
 .color-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .qty { font-weight: 800; white-space: nowrap; }
-.catalog-thumb {
-  width: 46px;
-  height: 36px;
+.catalog-image-button {
+  width: 38px;
+  height: 38px;
   border-radius: 6px;
-  overflow: hidden;
   border: 1px solid var(--line);
+  background: #fff;
+  color: var(--navy);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.catalog-image-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+}
+
+.catalog-image-button:hover {
+  border-color: var(--navy);
   background: var(--soft);
-  display: block;
 }
 
 .catalog-thumb-empty {
   width: 0;
   height: 0;
   border: 0;
-}
-
-.catalog-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .empty {
@@ -801,9 +808,25 @@ button.primary, #import-button, #import-avil-button {
 .modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .modal-header h3 { font-size: 16px; margin: 0; }
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
 
 .modal-body {
   flex: 1;
@@ -826,6 +849,26 @@ button.primary, #import-button, #import-avil-button {
 }
 
 .modal-search-input:focus { border-color: var(--navy); }
+
+.modal-image {
+  max-width: 520px;
+}
+
+.catalog-image-preview {
+  width: 100%;
+  max-height: 58vh;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.catalog-image-meta {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
 
 .selector-help {
   font-size: 12px;

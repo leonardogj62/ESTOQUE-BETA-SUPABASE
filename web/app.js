@@ -16,6 +16,8 @@ const state = {
   prices: [],
   labels: [],
   catalogAssets: [],
+  catalogAssetsById: new Map(),
+  refreshSeq: 0,
   query: "",
   source: "todos",
   avilFinish: "todos",
@@ -222,6 +224,11 @@ const els = {
   avilFileInput: document.getElementById("avil-file-input"),
   importAvilCatalogButton: document.getElementById("import-avil-catalog-button"),
   avilCatalogFileInput: document.getElementById("avil-catalog-file-input"),
+  catalogImageModal: document.getElementById("catalog-image-modal"),
+  catalogImageTitle: document.getElementById("catalog-image-title"),
+  catalogImagePreview: document.getElementById("catalog-image-preview"),
+  catalogImageMeta: document.getElementById("catalog-image-meta"),
+  closeCatalogImageButton: document.getElementById("close-catalog-image-button"),
   companySelect: document.getElementById("company-select"),
   accountButton: document.getElementById("account-button"),
   tabCadastros: document.getElementById("tab-cadastros"),
@@ -302,6 +309,10 @@ function bindEvents() {
   els.avilFileInput.addEventListener("change", runAvilImport);
   els.importAvilCatalogButton.addEventListener("click", () => els.avilCatalogFileInput.click());
   els.avilCatalogFileInput.addEventListener("change", runAvilCatalogImport);
+  els.closeCatalogImageButton.addEventListener("click", closeCatalogImageModal);
+  els.catalogImageModal.addEventListener("click", (event) => {
+    if (event.target === els.catalogImageModal) closeCatalogImageModal();
+  });
   els.newPriceButton.addEventListener("click", openPriceModal);
   els.cancelPriceBtn.addEventListener("click", closePriceModal);
   els.savePriceBtn.addEventListener("click", saveManualPrice);
@@ -357,6 +368,14 @@ function bindEvents() {
       : target?.parentElement?.closest(".washing-toggle");
     if (washingBtn) {
       toggleWashingBlock(washingBtn.dataset.key);
+      return;
+    }
+
+    const catalogButton = target instanceof Element
+      ? target.closest(".catalog-image-button")
+      : target?.parentElement?.closest(".catalog-image-button");
+    if (catalogButton) {
+      openCatalogImageModal(catalogButton.dataset.catalogId);
       return;
     }
 
@@ -714,19 +733,34 @@ async function refreshAll() {
     els.status.textContent = "Cadastre ou selecione uma empresa";
     return;
   }
+  const refreshSeq = ++state.refreshSeq;
   els.status.textContent = "Carregando dados...";
-  const [health, stock, prices, labels, catalogAssets] = await Promise.all([loadHealth(), loadStock(), loadPrices(), loadLabels(), loadCatalogAssets()]);
+  state.prices = [];
+  state.labels = [];
+  setCatalogAssets([]);
+  const [health, stock] = await Promise.all([loadHealth(), loadStock()]);
+  if (refreshSeq !== state.refreshSeq) return;
   state.health = health;
   state.rows = stock;
-  state.prices = prices;
-  state.labels = labels;
-  state.catalogAssets = catalogAssets;
   renderHealth();
   renderFilters();
   renderResults();
-  renderPrices();
   const lastImport = health.map((h) => h.imported_at).filter(Boolean).sort().at(-1);
   els.status.textContent = lastImport ? `Atualizado em ${formatDate(lastImport)}` : "Sem importação concluída";
+
+  Promise.all([loadPrices(), loadLabels(), loadCatalogAssets()])
+    .then(([prices, labels, catalogAssets]) => {
+      if (refreshSeq !== state.refreshSeq) return;
+      state.prices = prices;
+      state.labels = labels;
+      setCatalogAssets(catalogAssets);
+      renderResults();
+      renderPrices();
+      if (window.lucide) window.lucide.createIcons();
+    })
+    .catch((error) => {
+      console.error(error);
+    });
 }
 
 async function loadHealth() {
@@ -769,11 +803,23 @@ async function loadLabels() {
 
 async function loadCatalogAssets() {
   try {
-    return await supabaseSelectAll("product_catalog_assets", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc,color_label.asc`);
+    return await supabaseSelectAll(
+      "product_catalog_assets",
+      `select=id,company_id,normalized_name,display_name,normalized_color,color_label,color_code,image_path,catalog_file_name,catalog_page&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc,color_label.asc`,
+    );
   } catch (error) {
     console.error(error);
     return [];
   }
+}
+
+function setCatalogAssets(assets) {
+  state.catalogAssets = (assets || []).map((asset) => ({
+    ...asset,
+    normalizedProductForMatch: normalize(asset.display_name || asset.normalized_name || ""),
+    normalizedColorForMatch: normalize(asset.color_label || asset.normalized_color || ""),
+  }));
+  state.catalogAssetsById = new Map(state.catalogAssets.map((asset) => [String(asset.id), asset]));
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,7 +1099,7 @@ async function runAvilCatalogImport() {
     }
     els.status.textContent = `Catálogo AVIL importado: ${summaries.join(" | ")}`;
     state.labels = await loadLabels();
-    state.catalogAssets = await loadCatalogAssets();
+    setCatalogAssets(await loadCatalogAssets());
     renderResults();
   } catch (error) {
     els.status.textContent = readableError(error);
@@ -1343,6 +1389,7 @@ function renderResults() {
     : `${grouped.length} produto(s) · ${filtered.length} cor(es)`;
   els.results.innerHTML = grouped.map(renderProduct).join("");
   updateResultControlLabels(grouped);
+  if (window.lucide) window.lucide.createIcons();
 }
 
 // ---------------------------------------------------------------------------
@@ -2042,11 +2089,12 @@ async function generateStockComparePdf() {
 function groupByProduct(rows) {
   const map = new Map();
   for (const row of rows) {
-    const key = resultKey("produto", row.product_name);
+    const productName = displayProductNameForRow(row);
+    const key = resultKey("produto", productName);
     if (!map.has(key)) {
       map.set(key, {
         key,
-        name: row.product_name,
+        name: productName,
         subtitle: "",
         items: [],
       });
@@ -2060,11 +2108,12 @@ function groupByProductProcess(rows) {
   const map = new Map();
   for (const row of rows) {
     const process = row.process_code || "Sem processo";
-    const key = resultKey("processo", row.product_name, process);
+    const productName = displayProductNameForRow(row);
+    const key = resultKey("processo", productName, process);
     if (!map.has(key)) {
       map.set(key, {
         key,
-        name: row.product_name,
+        name: productName,
         subtitle: `Processo: ${process}`,
         items: [],
       });
@@ -2101,25 +2150,54 @@ function renderProduct(product) {
       </button>
       ${primaryLabel ? renderWashingPanel(primaryLabel, product.key, washingOpen) : ""}
       <div class="color-list" ${expanded ? "" : "hidden"}>
-        ${product.items.map((item) => `
-          <div class="color-row">
-            ${renderCatalogThumb(item)}
-            <div>
-              <strong>${escapeHtml(item.color_name)}</strong>
-              <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
-            </div>
-            <div class="qty">${formatQuantity(Number(item.quantity_meters || 0), unitForProduct(item.product_name))}</div>
-          </div>
-        `).join("")}
+        ${product.items.map((item) => renderColorRow(item)).join("")}
       </div>
     </article>
   `;
 }
 
+function renderColorRow(item) {
+  const asset = catalogAssetForItem(item);
+  return `
+    <div class="color-row">
+      ${renderCatalogButton(asset)}
+      <div>
+        <strong>${escapeHtml(displayColorName(item, asset))}</strong>
+        <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
+      </div>
+      <div class="qty">${formatQuantity(Number(item.quantity_meters || 0), unitForProduct(item.product_name))}</div>
+    </div>
+  `;
+}
+
+function displayProductNameForRow(row) {
+  const label = primaryLabelForProduct(labelsForProduct(row.product_name));
+  if (label?.display_name) return label.display_name;
+
+  if (AVIL_SOURCE_SLUGS.has(row.source_slug)) {
+    const lisoMatch = String(row.product_name || "").match(/^(.+?\bLIS[OA])\b/i);
+    if (lisoMatch) return normalizeAvilDisplayName(lisoMatch[1]);
+  }
+
+  return row.product_name;
+}
+
+function normalizeAvilDisplayName(value) {
+  return String(value || "")
+    .replace(/^(T|M)\.\s*/i, (_, prefix) => `${prefix.toUpperCase()}. `)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function displayColorName(item, asset = catalogAssetForItem(item)) {
+  if (!asset?.color_label) return item.color_name;
+  return `${asset.color_label} · ${item.color_name}`;
+}
+
 function catalogAssetsForProduct(productName) {
   const normalizedName = normalize(productName);
   return state.catalogAssets.filter((asset) => {
-    const assetName = normalize(asset.display_name || asset.normalized_name || "");
+    const assetName = asset.normalizedProductForMatch || normalize(asset.display_name || asset.normalized_name || "");
     return assetName === normalizedName || normalizedName.includes(assetName) || assetName.includes(normalizedName);
   });
 }
@@ -2129,9 +2207,9 @@ function catalogAssetForItem(item) {
   if (!productAssets.length) return null;
   const color = normalize(item.color_name);
   const stockColorCode = catalogColorCodeFromStock(item.color_name);
-  return productAssets.find((asset) => normalize(asset.color_label) === color)
+  return productAssets.find((asset) => (asset.normalizedColorForMatch || normalize(asset.color_label)) === color)
     || productAssets.find((asset) => stockColorCode && catalogColorCodesEqual(asset.color_code, stockColorCode))
-    || productAssets.find((asset) => color.includes(normalize(asset.color_label)) || normalize(asset.color_label).includes(color))
+    || productAssets.find((asset) => color.includes(asset.normalizedColorForMatch || normalize(asset.color_label)) || (asset.normalizedColorForMatch || normalize(asset.color_label)).includes(color))
     || null;
 }
 
@@ -2145,15 +2223,34 @@ function catalogColorCodesEqual(a, b) {
   return String(Number(a)) === String(Number(b));
 }
 
-function renderCatalogThumb(item) {
-  const asset = catalogAssetForItem(item);
+function renderCatalogButton(asset) {
   if (!asset) return `<span class="catalog-thumb catalog-thumb-empty" aria-hidden="true"></span>`;
-  const url = catalogImageUrl(asset.image_path);
   return `
-    <a class="catalog-thumb" href="${escapeAttr(url)}" target="_blank" rel="noopener" title="${escapeAttr(asset.color_label)}">
-      <img src="${escapeAttr(url)}" alt="${escapeAttr(asset.color_label)}">
-    </a>
+    <button class="catalog-image-button" type="button" data-catalog-id="${escapeAttr(asset.id)}" title="Ver imagem da cor ${escapeAttr(asset.color_label)}" aria-label="Ver imagem da cor ${escapeAttr(asset.color_label)}">
+      <i data-lucide="image" aria-hidden="true"></i>
+    </button>
   `;
+}
+
+function openCatalogImageModal(assetId) {
+  const asset = state.catalogAssetsById.get(String(assetId || ""));
+  if (!asset) return;
+  const url = catalogImageUrl(asset.image_path);
+  els.catalogImageTitle.textContent = asset.color_label || "Imagem da cor";
+  els.catalogImagePreview.src = url;
+  els.catalogImagePreview.alt = asset.color_label || "Imagem da cor";
+  els.catalogImageMeta.textContent = [
+    asset.display_name,
+    asset.color_code ? `Cor ${asset.color_code}` : "",
+    asset.catalog_file_name,
+  ].filter(Boolean).join(" · ");
+  els.catalogImageModal.hidden = false;
+}
+
+function closeCatalogImageModal() {
+  els.catalogImageModal.hidden = true;
+  els.catalogImagePreview.removeAttribute("src");
+  els.catalogImagePreview.alt = "";
 }
 
 function catalogImageUrl(path) {
