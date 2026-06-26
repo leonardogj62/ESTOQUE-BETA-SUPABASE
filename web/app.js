@@ -30,6 +30,7 @@ const state = {
   report: {
     scope: "visible",
     query: "",
+    includeImages: false,
     selected: new Set(),
   },
   compare: {
@@ -252,6 +253,7 @@ const els = {
   stockReportModal: document.getElementById("stock-report-modal"),
   stockReportScope: document.getElementById("stock-report-scope"),
   stockReportSearch: document.getElementById("stock-report-search"),
+  stockReportImages: document.getElementById("stock-report-images"),
   stockReportSelectVisible: document.getElementById("stock-report-select-visible"),
   stockReportClear: document.getElementById("stock-report-clear"),
   stockReportSummary: document.getElementById("stock-report-summary"),
@@ -349,6 +351,10 @@ function bindEvents() {
   els.stockReportScope.addEventListener("change", () => {
     state.report.scope = els.stockReportScope.value;
     state.report.selected = new Set();
+    renderStockReportList();
+  });
+  els.stockReportImages.addEventListener("change", () => {
+    state.report.includeImages = els.stockReportImages.value === "yes";
     renderStockReportList();
   });
   els.stockReportSearch.addEventListener("input", () => {
@@ -611,11 +617,11 @@ function syncAccessUi() {
   els.importButton.hidden = isAvil;
   els.importLabelsButton.hidden = isAvil;
 
-  // Botão AVIL: aparece só para empresa AVIL, requer login
+  // Botão de estoque AVIL: aparece só para empresa AVIL, requer login
   els.importAvilButton.hidden = !isAvil;
   els.importAvilButton.disabled = !signedIn;
   els.importAvilButton.title = signedIn ? "" : "Entre para enviar estoque";
-  els.importAvilCatalogButton.hidden = !isAvil;
+  els.importAvilCatalogButton.hidden = !state.companyId;
   els.importAvilCatalogButton.disabled = !signedIn;
   els.importAvilCatalogButton.title = signedIn ? "" : "Entre para enviar catálogo";
 
@@ -1087,6 +1093,7 @@ async function runAvilCatalogImport() {
       const payload = await extractAvilCatalogPayload(file);
       payload.organization_id = currentOrganizationId();
       payload.company_id = state.companyId;
+      payload.origin = currentCompany()?.trade_name || "Catálogo";
       els.importAvilCatalogButton.textContent = `Enviando ${payload.product_name.slice(0, 18)}...`;
       const res = await fetch(CONFIG.importCatalogFunctionUrl, {
         method: "POST",
@@ -1097,7 +1104,7 @@ async function runAvilCatalogImport() {
       if (!res.ok || result.ok === false) throw new Error(readableError(result.error || result || "Importação do catálogo falhou"));
       summaries.push(`${result.product || payload.product_name}: ${result.colors || payload.colors.length} cor(es)`);
     }
-    els.status.textContent = `Catálogo AVIL importado: ${summaries.join(" | ")}`;
+    els.status.textContent = `Catálogo importado: ${summaries.join(" | ")}`;
     state.labels = await loadLabels();
     setCatalogAssets(await loadCatalogAssets());
     renderResults();
@@ -1105,7 +1112,7 @@ async function runAvilCatalogImport() {
     els.status.textContent = readableError(error);
   } finally {
     els.importAvilCatalogButton.disabled = false;
-    els.importAvilCatalogButton.textContent = originalText || "Enviar Catálogo AVIL";
+    els.importAvilCatalogButton.textContent = originalText || "Subir Catálogo";
     els.avilCatalogFileInput.value = "";
   }
 }
@@ -1403,9 +1410,11 @@ function openStockReportModal() {
   }
   state.report.scope = "visible";
   state.report.query = "";
+  state.report.includeImages = false;
   state.report.selected = new Set();
   els.stockReportScope.value = state.report.scope;
   els.stockReportSearch.value = "";
+  els.stockReportImages.value = "no";
   els.stockReportModal.hidden = false;
   renderStockReportList();
 }
@@ -1448,9 +1457,10 @@ function reportCandidateRows() {
 function renderStockReportList() {
   const rows = reportCandidateRows();
   const shown = rows.slice(0, 500);
+  const rowsWithImages = rows.filter((row) => Boolean(catalogAssetForItem(row))).length;
   els.stockReportSummary.textContent = rows.length > shown.length
-    ? `${rows.length} item(ns) filtrado(s), mostrando ${shown.length}`
-    : `${rows.length} item(ns) filtrado(s)`;
+    ? `${rows.length} item(ns) filtrado(s), mostrando ${shown.length} · ${rowsWithImages} com foto`
+    : `${rows.length} item(ns) filtrado(s) · ${rowsWithImages} com foto`;
 
   if (!rows.length) {
     els.stockReportList.innerHTML = `<div class="empty"><strong>Nenhum item neste filtro.</strong></div>`;
@@ -1529,38 +1539,42 @@ async function generateStockReportPdf() {
     doc.text(`${currentCompany()?.trade_name || "Empresa"} · ${new Date().toLocaleString("pt-BR")}`, pageWidth / 2, titleY + 6, { align: "center" });
     doc.text(`Filtro: ${reportScopeLabel()} · ${selected.length} item(ns)`, pageWidth / 2, titleY + 11, { align: "center" });
 
-    const rows = selected
-      .sort(compareStockRows)
-      .map((row) => [
-        row.product_name || "",
+    const sorted = selected.sort(compareStockRows);
+    if (state.report.includeImages) {
+      await drawStockReportWithImages(doc, sorted, titleY + 20);
+      stampPageNumbers(doc);
+    } else {
+      const rows = sorted.map((row) => [
+        displayProductNameForRow(row) || row.product_name || "",
         row.source_label || "",
-        row.color_name || "",
+        displayColorName(row) || row.color_name || "",
         row.process_code || "",
         formatQuantity(row.quantity_meters, row.unit || unitForProduct(row.product_name)),
       ]);
 
-    doc.autoTable({
-      startY: titleY + 18,
-      head: [["Produto", "Fonte", "Cor", "Processo", "Quantidade"]],
-      body: rows,
-      styles: { fontSize: 7, cellPadding: 1.6, overflow: "linebreak", valign: "middle" },
-      headStyles: { fillColor: [0, 72, 124], textColor: 255, fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [245, 247, 243] },
-      columnStyles: {
-        0: { cellWidth: 70 },
-        1: { cellWidth: 26 },
-        2: { cellWidth: 28 },
-        3: { cellWidth: 28 },
-        4: { cellWidth: 25, halign: "right" },
-      },
-      margin: { left: 10, right: 10 },
-      didDrawPage: () => {
-        const page = doc.internal.getNumberOfPages();
-        doc.setFontSize(8);
-        doc.setTextColor(120);
-        doc.text(`Pagina ${page}`, pageWidth - 12, doc.internal.pageSize.getHeight() - 8, { align: "right" });
-      },
-    });
+      doc.autoTable({
+        startY: titleY + 18,
+        head: [["Produto", "Fonte", "Cor", "Processo", "Quantidade"]],
+        body: rows,
+        styles: { fontSize: 7, cellPadding: 1.6, overflow: "linebreak", valign: "middle" },
+        headStyles: { fillColor: [0, 72, 124], textColor: 255, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [245, 247, 243] },
+        columnStyles: {
+          0: { cellWidth: 70 },
+          1: { cellWidth: 26 },
+          2: { cellWidth: 38 },
+          3: { cellWidth: 20 },
+          4: { cellWidth: 25, halign: "right" },
+        },
+        margin: { left: 10, right: 10 },
+        didDrawPage: () => {
+          const page = doc.internal.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.setTextColor(120);
+          doc.text(`Pagina ${page}`, pageWidth - 12, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+        },
+      });
+    }
 
     doc.save(`estoque-${slugify(currentCompany()?.trade_name || "empresa")}-${new Date().toISOString().slice(0, 10)}.pdf`);
     closeStockReportModal();
@@ -1569,6 +1583,111 @@ async function generateStockReportPdf() {
   } finally {
     els.generateStockReportButton.disabled = state.report.selected.size === 0;
     els.generateStockReportButton.textContent = "Gerar PDF";
+  }
+}
+
+async function drawStockReportWithImages(doc, rows, startY) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const imageCache = new Map();
+  const groups = groupRowsForReport(rows);
+  let y = startY;
+
+  for (const group of groups) {
+    if (y > pageHeight - 32) {
+      doc.addPage();
+      y = 14;
+    }
+
+    doc.setTextColor(26, 26, 46);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(group.name, 10, y);
+    y += 6;
+
+    for (const row of group.rows) {
+      const asset = catalogAssetForItem(row);
+      const cardHeight = asset ? 30 : 18;
+      if (y + cardHeight > pageHeight - 14) {
+        doc.addPage();
+        y = 14;
+      }
+
+      doc.setDrawColor(222, 224, 218);
+      doc.setFillColor(255, 255, 255);
+      doc.rect(10, y, pageWidth - 20, cardHeight, "FD");
+
+      let textX = 14;
+      if (asset) {
+        const image = await loadCatalogReportImage(asset, imageCache);
+        if (image) {
+          doc.addImage(image, "JPEG", 14, y + 3, 28, 21);
+          textX = 46;
+        }
+      }
+
+      doc.setTextColor(26, 26, 46);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      const colorText = displayColorName(row, asset);
+      doc.text(doc.splitTextToSize(colorText, pageWidth - textX - 56), textX, y + 7);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(90, 90, 90);
+      const meta = [
+        row.source_label,
+        row.process_code && `Processo ${row.process_code}`,
+        asset ? "Foto cadastrada" : "Sem foto cadastrada",
+      ].filter(Boolean).join(" · ");
+      doc.text(doc.splitTextToSize(meta, pageWidth - textX - 56), textX, y + 15);
+
+      doc.setTextColor(26, 26, 46);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(
+        formatQuantity(row.quantity_meters, row.unit || unitForProduct(row.product_name)),
+        pageWidth - 14,
+        y + 12,
+        { align: "right" },
+      );
+
+      y += cardHeight + 3;
+    }
+
+    y += 3;
+  }
+}
+
+function groupRowsForReport(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const name = displayProductNameForRow(row);
+    const key = normalize(name);
+    if (!map.has(key)) map.set(key, { name, rows: [] });
+    map.get(key).rows.push(row);
+  }
+  return [...map.values()];
+}
+
+async function loadCatalogReportImage(asset, cache) {
+  const url = catalogImageUrl(asset.image_path);
+  if (cache.has(url)) return cache.get(url);
+  const dataUrl = await loadImageDataUrl(url);
+  cache.set(url, dataUrl);
+  return dataUrl;
+}
+
+function stampPageNumbers(doc) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const pages = doc.internal.getNumberOfPages();
+  for (let page = 1; page <= pages; page++) {
+    doc.setPage(page);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(`Pagina ${page}`, pageWidth - 12, pageHeight - 8, { align: "right" });
   }
 }
 

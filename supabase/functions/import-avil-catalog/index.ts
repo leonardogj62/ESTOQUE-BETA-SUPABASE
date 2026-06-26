@@ -19,6 +19,7 @@ type CatalogPayload = {
   company_id: string;
   file_name: string;
   product_name: string;
+  origin?: string;
   specs: Record<string, string>;
   colors: CatalogColor[];
 };
@@ -76,7 +77,7 @@ Deno.serve(async (req) => {
         specs.rendimento && `Rend. ${specs.rendimento}`,
       ].filter(Boolean).join(" · ") || null,
       composition: specs.composicao || null,
-      origin: "AVIL",
+      origin: payload.origin || "Catálogo",
       washing_instructions: [],
       ocr_text: Object.entries(specs).map(([key, value]) => `${key}: ${value}`).join("\n"),
       updated_at: new Date().toISOString(),

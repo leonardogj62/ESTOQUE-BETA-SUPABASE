@@ -659,7 +659,7 @@ button.primary, #import-button, #import-avil-button {
 
 .report-filter-grid {
   display: grid;
-  grid-template-columns: minmax(170px, 220px) 1fr;
+  grid-template-columns: minmax(160px, 210px) 1fr minmax(150px, 190px);
   gap: 10px;
   flex-shrink: 0;
 }
