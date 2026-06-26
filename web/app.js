@@ -2,6 +2,7 @@ const CONFIG = {
   supabaseUrl: "https://jqffpijcrzflojahbfyp.supabase.co",
   supabaseAnonKey: "sb_publishable_AdUjgkJxz54MDgLX_b9tfw_yTJVh4I6",
   importFunctionUrl: "https://jqffpijcrzflojahbfyp.supabase.co/functions/v1/import-stock",
+  importCatalogFunctionUrl: "https://jqffpijcrzflojahbfyp.supabase.co/functions/v1/import-avil-catalog",
   publicAppUrl: "https://leonardogj62.github.io/ESTOQUE-BETA-SUPABASE/web/",
 };
 
@@ -14,6 +15,7 @@ const state = {
   health: [],
   prices: [],
   labels: [],
+  catalogAssets: [],
   query: "",
   source: "todos",
   avilFinish: "todos",
@@ -218,6 +220,8 @@ const els = {
   cancelBtn: document.getElementById("cancel-update-btn"),
   importAvilButton: document.getElementById("import-avil-button"),
   avilFileInput: document.getElementById("avil-file-input"),
+  importAvilCatalogButton: document.getElementById("import-avil-catalog-button"),
+  avilCatalogFileInput: document.getElementById("avil-catalog-file-input"),
   companySelect: document.getElementById("company-select"),
   accountButton: document.getElementById("account-button"),
   tabCadastros: document.getElementById("tab-cadastros"),
@@ -296,6 +300,8 @@ function bindEvents() {
   els.importPricesButton.addEventListener("click", runPriceImport);
   els.importAvilButton.addEventListener("click", () => els.avilFileInput.click());
   els.avilFileInput.addEventListener("change", runAvilImport);
+  els.importAvilCatalogButton.addEventListener("click", () => els.avilCatalogFileInput.click());
+  els.avilCatalogFileInput.addEventListener("change", runAvilCatalogImport);
   els.newPriceButton.addEventListener("click", openPriceModal);
   els.cancelPriceBtn.addEventListener("click", closePriceModal);
   els.savePriceBtn.addEventListener("click", saveManualPrice);
@@ -590,6 +596,9 @@ function syncAccessUi() {
   els.importAvilButton.hidden = !isAvil;
   els.importAvilButton.disabled = !signedIn;
   els.importAvilButton.title = signedIn ? "" : "Entre para enviar estoque";
+  els.importAvilCatalogButton.hidden = !isAvil;
+  els.importAvilCatalogButton.disabled = !signedIn;
+  els.importAvilCatalogButton.title = signedIn ? "" : "Entre para enviar catálogo";
 
   els.newRegistryButton.disabled = !signedIn;
   els.registrySummary.textContent = signedIn
@@ -706,11 +715,12 @@ async function refreshAll() {
     return;
   }
   els.status.textContent = "Carregando dados...";
-  const [health, stock, prices, labels] = await Promise.all([loadHealth(), loadStock(), loadPrices(), loadLabels()]);
+  const [health, stock, prices, labels, catalogAssets] = await Promise.all([loadHealth(), loadStock(), loadPrices(), loadLabels(), loadCatalogAssets()]);
   state.health = health;
   state.rows = stock;
   state.prices = prices;
   state.labels = labels;
+  state.catalogAssets = catalogAssets;
   renderHealth();
   renderFilters();
   renderResults();
@@ -751,6 +761,15 @@ async function loadPrices() {
 async function loadLabels() {
   try {
     return await supabaseSelectAll("product_labels", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc`);
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+async function loadCatalogAssets() {
+  try {
+    return await supabaseSelectAll("product_catalog_assets", `select=*&company_id=eq.${encodeURIComponent(state.companyId)}&order=display_name.asc,color_label.asc`);
   } catch (error) {
     console.error(error);
     return [];
@@ -1003,6 +1022,126 @@ async function runAvilImport() {
     els.importAvilButton.textContent = "Enviar PDF AVIL";
     els.avilFileInput.value = "";
   }
+}
+
+async function runAvilCatalogImport() {
+  const files = [...(els.avilCatalogFileInput.files || [])];
+  if (!files.length) return;
+  if (!requireSession()) {
+    els.avilCatalogFileInput.value = "";
+    return;
+  }
+
+  els.importAvilCatalogButton.disabled = true;
+  const originalText = els.importAvilCatalogButton.textContent;
+  try {
+    const summaries = [];
+    for (const file of files) {
+      els.importAvilCatalogButton.textContent = `Lendo ${file.name.slice(0, 18)}...`;
+      const payload = await extractAvilCatalogPayload(file);
+      payload.organization_id = currentOrganizationId();
+      payload.company_id = state.companyId;
+      els.importAvilCatalogButton.textContent = `Enviando ${payload.product_name.slice(0, 18)}...`;
+      const res = await fetch(CONFIG.importCatalogFunctionUrl, {
+        method: "POST",
+        headers: requestHeaders({ write: true }),
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.ok === false) throw new Error(readableError(result.error || result || "Importação do catálogo falhou"));
+      summaries.push(`${result.product || payload.product_name}: ${result.colors || payload.colors.length} cor(es)`);
+    }
+    els.status.textContent = `Catálogo AVIL importado: ${summaries.join(" | ")}`;
+    state.labels = await loadLabels();
+    state.catalogAssets = await loadCatalogAssets();
+    renderResults();
+  } catch (error) {
+    els.status.textContent = readableError(error);
+  } finally {
+    els.importAvilCatalogButton.disabled = false;
+    els.importAvilCatalogButton.textContent = originalText || "Enviar Catálogo AVIL";
+    els.avilCatalogFileInput.value = "";
+  }
+}
+
+async function extractAvilCatalogPayload(file) {
+  const lib = window.pdfjsLib;
+  if (!lib) throw new Error("pdfjs não carregado");
+  const bytes = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: bytes }).promise;
+  if (pdf.numPages < 3) throw new Error("Catálogo sem páginas de cores.");
+
+  const specsText = await extractPdfPageText(pdf, 2);
+  const { productName, specs } = parseAvilCatalogSpecs(specsText, file.name);
+  const colors = [];
+  for (let pageNo = 3; pageNo <= pdf.numPages; pageNo++) {
+    const text = await extractPdfPageText(pdf, pageNo);
+    const caption = parseAvilCatalogColor(text);
+    if (!caption?.label) continue;
+    const imageData = await renderPdfPageImage(pdf, pageNo);
+    colors.push({ ...caption, page: pageNo, image_data_url: imageData });
+  }
+  if (!productName) throw new Error("Não consegui identificar o produto do catálogo.");
+  if (!colors.length) throw new Error("Não consegui identificar cores no catálogo.");
+  return {
+    file_name: file.name,
+    product_name: productName,
+    specs,
+    colors,
+  };
+}
+
+async function extractPdfPageText(pdf, pageNo) {
+  const page = await pdf.getPage(pageNo);
+  const content = await page.getTextContent();
+  return content.items.map((item) => item.str || "").join("\n").trim();
+}
+
+async function renderPdfPageImage(pdf, pageNo) {
+  const page = await pdf.getPage(pageNo);
+  const viewport = page.getViewport({ scale: 1.3 });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.78);
+}
+
+function parseAvilCatalogSpecs(text, fileName) {
+  const lines = String(text || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const productName = cleanCatalogProductName(lines[0] || fileName.replace(/\.pdf$/i, ""));
+  const joined = lines.join("\n");
+  const specs = {
+    cont: catalogMatch(joined, /Cont\s*[-–]\s*([^\n]+)/i),
+    codigo: catalogMatch(joined, /C[oó]digo\s*[-–]\s*([^\n]+)/i) || catalogMatch(fileName, /COD\s*[-,]?\s*(\d+)/i),
+    largura: catalogMatch(joined, /Largura\s*[-–]\s*([^\n]+)/i),
+    composicao: catalogMatch(joined, /Comp\.?\s*[-–]\s*([^\n]+)/i),
+    gm2: catalogMatch(joined, /G\/M[²2]\s*[-–]\s*([^\n]+)/i),
+    gml: catalogMatch(joined, /G\/ML\s*[-–]\s*([^\n]+)/i),
+    rendimento: catalogMatch(joined, /Rend\.?\s*[-–]\s*([^\n]+)/i),
+  };
+  return { productName, specs };
+}
+
+function parseAvilCatalogColor(text) {
+  const line = String(text || "").split(/\n+/).map((item) => item.trim()).filter(Boolean).at(-1) || "";
+  const match = line.match(/^(\d+)\s*[-–]\s*(.+)$/);
+  if (match) return { code: match[1], label: match[2].trim() };
+  return line ? { label: line } : null;
+}
+
+function cleanCatalogProductName(value) {
+  return String(value || "")
+    .replace(/\.pdf$/i, "")
+    .replace(/,\s*COD.*$/i, "")
+    .replace(/\s*-\s*UNIFICADO\s*$/i, " LISO")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function catalogMatch(text, pattern) {
+  return String(text || "").match(pattern)?.[1]?.replace(/^•\s*/, "").trim() || "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1943,6 +2082,7 @@ function renderProduct(product) {
   const productPrices = pricesForProduct(product.name);
   const productLabels = labelsForProduct(product.name);
   const primaryLabel = primaryLabelForProduct(productLabels);
+  const catalogAssets = catalogAssetsForProduct(product.name);
   const washingOpen = state.expandedWashing.has(product.key);
   return `
     <article class="product-card ${expanded ? "expanded" : ""}">
@@ -1955,7 +2095,7 @@ function renderProduct(product) {
             ${sources.map((s) => `<span class="tag ${sourceClass(s)}">${escapeHtml(s.source_label)}</span>`).join("")}
           </div>
           ${productPrices.length ? `<div class="price-tags">${productPrices.slice(0, 2).map(renderPriceTag).join("")}</div>` : ""}
-          ${primaryLabel ? renderLabelHeader(primaryLabel, productLabels.length) : ""}
+          ${primaryLabel ? renderLabelHeader(primaryLabel, catalogAssets.length) : ""}
         </div>
         <span class="product-arrow" aria-hidden="true">⌄</span>
       </button>
@@ -1963,6 +2103,7 @@ function renderProduct(product) {
       <div class="color-list" ${expanded ? "" : "hidden"}>
         ${product.items.map((item) => `
           <div class="color-row">
+            ${renderCatalogThumb(item)}
             <div>
               <strong>${escapeHtml(item.color_name)}</strong>
               <div class="color-meta">${escapeHtml(item.source_label)}${item.process_code ? ` · Processo: ${escapeHtml(item.process_code)}` : ""}</div>
@@ -1973,6 +2114,54 @@ function renderProduct(product) {
       </div>
     </article>
   `;
+}
+
+function catalogAssetsForProduct(productName) {
+  const normalizedName = normalize(productName);
+  return state.catalogAssets.filter((asset) => {
+    const assetName = normalize(asset.display_name || asset.normalized_name || "");
+    return assetName === normalizedName || normalizedName.includes(assetName) || assetName.includes(normalizedName);
+  });
+}
+
+function catalogAssetForItem(item) {
+  const productAssets = catalogAssetsForProduct(item.product_name);
+  if (!productAssets.length) return null;
+  const color = normalize(item.color_name);
+  const stockColorCode = catalogColorCodeFromStock(item.color_name);
+  return productAssets.find((asset) => normalize(asset.color_label) === color)
+    || productAssets.find((asset) => stockColorCode && catalogColorCodesEqual(asset.color_code, stockColorCode))
+    || productAssets.find((asset) => color.includes(normalize(asset.color_label)) || normalize(asset.color_label).includes(color))
+    || null;
+}
+
+function catalogColorCodeFromStock(colorName) {
+  const match = String(colorName || "").match(/-(\d+)$/);
+  return match ? String(Number(match[1])) : "";
+}
+
+function catalogColorCodesEqual(a, b) {
+  if (!a || !b) return false;
+  return String(Number(a)) === String(Number(b));
+}
+
+function renderCatalogThumb(item) {
+  const asset = catalogAssetForItem(item);
+  if (!asset) return `<span class="catalog-thumb catalog-thumb-empty" aria-hidden="true"></span>`;
+  const url = catalogImageUrl(asset.image_path);
+  return `
+    <a class="catalog-thumb" href="${escapeAttr(url)}" target="_blank" rel="noopener" title="${escapeAttr(asset.color_label)}">
+      <img src="${escapeAttr(url)}" alt="${escapeAttr(asset.color_label)}">
+    </a>
+  `;
+}
+
+function catalogImageUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  if (String(path || "").startsWith("assets/") || String(path || "").startsWith("./assets/")) {
+    return String(path).replace(/^\.\//, "./");
+  }
+  return `${CONFIG.supabaseUrl}/storage/v1/object/public/product-catalog-images/${encodeURI(path).replace(/%2F/g, "/")}`;
 }
 
 function labelsForProduct(productName) {
@@ -2004,7 +2193,7 @@ function primaryLabelForProduct(labels) {
   return labels.find((label) => labelScore(label) > 1) || labels[0] || null;
 }
 
-function renderLabelHeader(label) {
+function renderLabelHeader(label, assetCount = 0) {
   const facts = [
     label.reference ? `Ref ${label.reference}` : null,
     label.width ? `Larg. ${label.width}` : null,
@@ -2016,6 +2205,7 @@ function renderLabelHeader(label) {
     <div class="label-header">
       ${facts.length ? `<div class="label-tech-line">${escapeHtml(facts.join(" · "))}</div>` : ""}
       ${composition ? `<div class="label-composition">${escapeHtml(composition)}</div>` : ""}
+      ${assetCount ? `<div class="label-composition">${assetCount} imagem(ns) de cor cadastrada(s)</div>` : ""}
     </div>
   `;
 }

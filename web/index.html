@@ -16,7 +16,7 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-  <script defer src="./app.js?v=20260625-8"></script>
+  <script defer src="./app.js?v=20260625-9"></script>
 </head>
 <body>
   <header class="topbar">
@@ -47,7 +47,9 @@
       <button id="import-button" type="button">Importar Drive</button>
       <button id="import-labels-button" type="button">Importar Etiquetas</button>
       <button id="import-avil-button" type="button" hidden>Enviar PDF AVIL</button>
+      <button id="import-avil-catalog-button" type="button" hidden>Enviar Catálogo AVIL</button>
       <input id="avil-file-input" type="file" accept=".pdf,application/pdf" hidden>
+      <input id="avil-catalog-file-input" type="file" accept=".pdf,application/pdf" multiple hidden>
     </section>
 
     <nav class="tabs" id="main-tabs">

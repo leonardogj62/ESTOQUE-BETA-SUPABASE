@@ -437,8 +437,9 @@ button.primary, #import-button, #import-avil-button {
 
 .color-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
+  align-items: center;
   padding: 10px 14px;
   border-top: 1px solid var(--line);
   font-size: 13px;
@@ -446,6 +447,28 @@ button.primary, #import-button, #import-avil-button {
 
 .color-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .qty { font-weight: 800; white-space: nowrap; }
+.catalog-thumb {
+  width: 46px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  display: block;
+}
+
+.catalog-thumb-empty {
+  width: 0;
+  height: 0;
+  border: 0;
+}
+
+.catalog-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 .empty {
   text-align: center;
